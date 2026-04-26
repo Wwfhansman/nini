@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional
 
 from backend import database
-from backend.agent.providers import get_model_provider
-from backend.agent.schemas import AgentOutput, ChatRequest, VisionObservation
+from backend.agent.prompts import render_agent_messages
+from backend.agent.providers import MockAgentProvider, MockVisionProvider, ProviderError, get_agent_provider, get_vision_provider
+from backend.agent.schemas import AgentOutput, ChatRequest
 from backend.config import get_settings
 from backend.skills import inventory, memory, recipe, vision
 from backend.terminal import state as terminal_state
@@ -41,6 +43,7 @@ def _record_event(
     name: str,
     input_json: Optional[Dict[str, Any]] = None,
     output_json: Optional[Dict[str, Any]] = None,
+    status: str = "success",
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     return database.add_tool_event(
@@ -49,7 +52,54 @@ def _record_event(
         name=name,
         input_json=input_json,
         output_json=output_json,
-        status="success",
+        status=status,
+        db_path=db_path,
+    )
+
+
+def _provider_log(
+    terminal_id: str,
+    provider: str,
+    model: Optional[str],
+    status: str,
+    latency_ms: Optional[int],
+    error: Optional[str],
+    db_path: Optional[str],
+) -> None:
+    settings = get_settings()
+    if not settings.enable_provider_logs:
+        return
+    database.add_provider_log(
+        provider=provider,
+        model=model,
+        status=status,
+        latency_ms=latency_ms,
+        error=error,
+        terminal_id=terminal_id,
+        db_path=db_path,
+    )
+
+
+def _provider_error_event(
+    terminal_id: str,
+    provider: str,
+    model: Optional[str],
+    error: str,
+    latency_ms: Optional[int],
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    return _record_event(
+        terminal_id,
+        "provider_error",
+        input_json={"provider": provider, "model": model},
+        output_json={
+            "provider": provider,
+            "model": model,
+            "status": "fallback_to_mock",
+            "latency_ms": latency_ms,
+            "error": error[:500],
+        },
+        status="fallback",
         db_path=db_path,
     )
 
@@ -57,6 +107,26 @@ def _record_event(
 def detect_p0_command(text: str) -> Optional[str]:
     normalized = text.strip().strip(P0_TRAILING_PUNCTUATION)
     return P0_COMMANDS.get(normalized)
+
+
+def _vision_speech(observation_dict: Dict[str, Any]) -> str:
+    ingredients = observation_dict.get("ingredients") or []
+    ingredient_map = {item.get("name"): item for item in ingredients if item.get("name")}
+    tomato_amount = str((ingredient_map.get("番茄") or {}).get("amount") or "")
+    chicken_amount = str((ingredient_map.get("鸡胸肉") or {}).get("amount") or "")
+    if tomato_amount == "半个":
+        return "我看到番茄只有半个，我会把这道菜改成一人份。"
+    if chicken_amount == "少量":
+        return "我看到鸡胸肉比较少，我会按实际食材更新库存和做法。"
+    if ingredients:
+        observed = "、".join(
+            f"{item.get('name')}{item.get('amount') or ''}"
+            for item in ingredients[:3]
+            if item.get("name")
+        )
+        if observed:
+            return f"我看到{observed}，已按识别结果更新库存。"
+    return "我没有识别到明确食材，先保持当前菜谱。"
 
 
 def handle_chat(
@@ -88,12 +158,45 @@ def handle_chat(
         "state": state,
         "memories": relevant_memories,
         "inventory": inventory.inventory_summary(terminal_id, db_path=resolved_db_path),
+        "recipe_documents": database.list_recipe_documents(terminal_id, db_path=resolved_db_path),
         "recent_messages": database.list_recent_conversations(terminal_id, db_path=resolved_db_path),
     }
-    provider = get_model_provider(settings.demo_mode)
-    agent_output = provider.chat_json(request.text, context)
-    tool_names = _tool_names(agent_output)
     events: List[Dict[str, Any]] = []
+    provider = get_agent_provider(settings)
+    messages = render_agent_messages(request.text, context)
+    provider_error: Optional[str] = None
+    start_ms = time.perf_counter()
+    try:
+        agent_output = provider.chat_json(request.text, context, messages=messages)
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        if not isinstance(provider, MockAgentProvider):
+            _provider_log(terminal_id, provider.name, provider.model, "success", latency_ms, None, resolved_db_path)
+            events.append(
+                _record_event(
+                    terminal_id,
+                    "provider_call",
+                    input_json={"provider": provider.name, "model": provider.model},
+                    output_json={"status": "success", "latency_ms": latency_ms},
+                    db_path=resolved_db_path,
+                )
+            )
+    except ProviderError as exc:
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        provider_error = str(exc)
+        _provider_log(terminal_id, exc.provider, exc.model, "error", latency_ms, provider_error, resolved_db_path)
+        events.append(
+            _provider_error_event(
+                terminal_id,
+                exc.provider,
+                exc.model,
+                provider_error,
+                latency_ms,
+                resolved_db_path,
+            )
+        )
+        agent_output = MockAgentProvider().chat_json(request.text, context)
+
+    tool_names = _tool_names(agent_output)
 
     written_memories = []
     if agent_output.memory_writes:
@@ -189,6 +292,13 @@ def handle_chat(
             "speech": agent_output.speech,
             "intent": agent_output.intent,
             "ui_patch": agent_output.ui_patch,
+            "provider": {
+                "mode": settings.demo_mode,
+                "name": provider.name,
+                "model": provider.model,
+                "fallback_used": provider_error is not None,
+                "error": provider_error,
+            },
         },
         "state": next_state,
         "events": events,
@@ -198,22 +308,73 @@ def handle_chat(
 def handle_vision(
     terminal_id: str,
     purpose: str = "ingredients",
+    image_bytes: Optional[bytes] = None,
+    content_type: str = "image/jpeg",
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     settings = get_settings()
     resolved_db_path = db_path or settings.db_path
     state = terminal_state.get_state(terminal_id, db_path=resolved_db_path)
-    observation = vision.mock_observe_ingredients()
+    provider = get_vision_provider(settings)
+    provider_error: Optional[str] = None
+    events: List[Dict[str, Any]] = []
+    start_ms = time.perf_counter()
+    try:
+        observation = provider.observe_ingredients(
+            image_bytes=image_bytes,
+            content_type=content_type,
+            purpose=purpose,
+        )
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        if not isinstance(provider, MockVisionProvider):
+            _provider_log(terminal_id, provider.name, provider.model, "success", latency_ms, None, resolved_db_path)
+            events.append(
+                _record_event(
+                    terminal_id,
+                    "provider_call",
+                    input_json={"provider": provider.name, "model": provider.model, "purpose": purpose},
+                    output_json={"status": "success", "latency_ms": latency_ms},
+                    db_path=resolved_db_path,
+                )
+            )
+    except ProviderError as exc:
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        provider_error = str(exc)
+        _provider_log(terminal_id, exc.provider, exc.model, "error", latency_ms, provider_error, resolved_db_path)
+        events.append(
+            _record_event(
+                terminal_id,
+                "vision_provider_fallback",
+                input_json={"provider": exc.provider, "model": exc.model, "purpose": purpose},
+                output_json={
+                    "status": "fallback_to_mock",
+                    "latency_ms": latency_ms,
+                    "error": provider_error[:500],
+                },
+                status="fallback",
+                db_path=resolved_db_path,
+            )
+        )
+        observation = vision.mock_observe_ingredients()
     observation_dict = _model_to_dict(observation)
-    events = [
+    events.append(
         _record_event(
             terminal_id,
             "vision_observe",
             input_json={"purpose": purpose},
-            output_json={"observation": observation_dict},
+            output_json={
+                "observation": observation_dict,
+                "provider": {
+                    "mode": settings.demo_mode,
+                    "name": provider.name,
+                    "model": provider.model,
+                    "fallback_used": provider_error is not None,
+                    "error": provider_error,
+                },
+            },
             db_path=resolved_db_path,
         )
-    ]
+    )
     patches = [
         {
             "name": ingredient.name,
@@ -234,6 +395,8 @@ def handle_vision(
         )
     )
     next_state = recipe.adjust_recipe_for_vision(state, observation)
+    speech = _vision_speech(observation_dict)
+    next_state["last_speech"] = speech
     next_state = database.save_state(terminal_id, next_state, db_path=resolved_db_path)
     events.append(
         _record_event(
@@ -244,7 +407,6 @@ def handle_vision(
             db_path=resolved_db_path,
         )
     )
-    speech = "我看到番茄只有半个，我会把这道菜改成一人份。"
     database.add_conversation(
         terminal_id,
         "assistant",
@@ -253,7 +415,17 @@ def handle_vision(
         db_path=resolved_db_path,
     )
     return {
-        "data": {"observation": observation_dict, "speech": speech},
+        "data": {
+            "observation": observation_dict,
+            "speech": speech,
+            "provider": {
+                "mode": settings.demo_mode,
+                "name": provider.name,
+                "model": provider.model,
+                "fallback_used": provider_error is not None,
+                "error": provider_error,
+            },
+        },
         "state": next_state,
         "events": events,
     }

@@ -59,8 +59,11 @@ http://127.0.0.1:8000/test-console
   - memories
   - inventory
   - tool_events
+  - provider_logs
   - raw response
 ```
+
+页面顶部显示当前 `DEMO_MODE` 和 provider 配置状态。测试页只显示是否已配置，不显示 `QINIU_API_KEY`。
 
 ## 必须支持的操作
 
@@ -115,6 +118,14 @@ http://127.0.0.1:8000/test-console
 ```
 
 脚本会输出每一步的 HTTP 状态、`state.ui_mode`、最新事件和关键断言结果，用于快速确认 mock demo 主线仍可复现。
+
+hybrid smoke：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --mode hybrid-smoke --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+hybrid smoke 会先检查 `/health` 和 `/api/state`。如果后端未配置七牛 key 或 `MODEL_AGENT`，真实 chat 调用会被跳过，不影响 mock demo 验证；如果已配置，则必须出现真实 `provider_call` 成功，fallback 到 mock 会被判定为失败。
 
 ## 调试成功标准
 

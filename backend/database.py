@@ -1,4 +1,4 @@
-"""SQLite helpers for phase 0-2 backend state."""
+"""SQLite helpers for backend state and event persistence."""
 
 from __future__ import annotations
 
@@ -119,6 +119,17 @@ def init_db(db_path: Optional[str] = None) -> None:
               parsed_json TEXT,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS provider_logs (
+              id TEXT PRIMARY KEY,
+              terminal_id TEXT,
+              provider TEXT NOT NULL,
+              model TEXT,
+              status TEXT NOT NULL,
+              latency_ms INTEGER,
+              error TEXT,
+              created_at TEXT NOT NULL
             );
             """
         )
@@ -446,6 +457,66 @@ def list_recipe_documents(terminal_id: str, db_path: Optional[str] = None) -> Li
     ]
 
 
+def add_provider_log(
+    provider: str,
+    model: Optional[str],
+    status: str,
+    latency_ms: Optional[int] = None,
+    error: Optional[str] = None,
+    terminal_id: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    log = {
+        "id": f"provider_log_{uuid.uuid4().hex}",
+        "terminal_id": terminal_id,
+        "provider": provider,
+        "model": model,
+        "status": status,
+        "latency_ms": latency_ms,
+        "error": error[:500] if error else None,
+        "created_at": utc_now(),
+    }
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO provider_logs (id, terminal_id, provider, model, status, latency_ms, error, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                log["id"],
+                terminal_id,
+                provider,
+                model,
+                status,
+                latency_ms,
+                log["error"],
+                log["created_at"],
+            ),
+        )
+    return log
+
+
+def list_provider_logs(
+    terminal_id: Optional[str] = None,
+    limit: int = 20,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    query = """
+        SELECT id, terminal_id, provider, model, status, latency_ms, error, created_at
+        FROM (
+          SELECT rowid AS row_order, id, terminal_id, provider, model, status, latency_ms, error, created_at
+          FROM provider_logs
+          WHERE (? IS NULL OR terminal_id = ?)
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT ?
+        )
+        ORDER BY created_at ASC, row_order ASC
+    """
+    with _connect(db_path) as conn:
+        rows = conn.execute(query, (terminal_id, terminal_id, limit)).fetchall()
+    return [dict(row) for row in rows]
+
+
 def add_tool_event(
     terminal_id: str,
     event_type: str,
@@ -578,6 +649,7 @@ def reset_demo_data(terminal_id: Optional[str] = None, db_path: Optional[str] = 
         "tool_events",
         "conversations",
         "recipe_documents",
+        "provider_logs",
     ]
     with _connect(db_path) as conn:
         for table in tables:

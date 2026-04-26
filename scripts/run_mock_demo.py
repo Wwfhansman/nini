@@ -45,6 +45,17 @@ def p0_model_called_false(payload: Dict[str, Any]) -> bool:
     return False
 
 
+def successful_real_provider_call(payload: Dict[str, Any]) -> bool:
+    provider = (payload.get("data") or {}).get("provider") or {}
+    if provider.get("name") != "qiniu_chat" or provider.get("fallback_used") is not False:
+        return False
+    for event in payload.get("events", []):
+        output = event.get("output") or {}
+        if event.get("name") == "provider_call" and output.get("status") == "success":
+            return True
+    return False
+
+
 def make_step_result(
     name: str,
     response: httpx.Response,
@@ -252,15 +263,56 @@ def run_demo(base_url: str, terminal_id: str) -> int:
     return 0
 
 
+def run_hybrid_smoke(base_url: str, terminal_id: str) -> int:
+    base_url = base_url.rstrip("/")
+    with httpx.Client(timeout=10) as client:
+        health = client.get(f"{base_url}/health")
+        ensure_success(health)
+        health_payload = health.json()
+        providers = health_payload.get("providers") or {}
+        print(f"PASS health: HTTP {health.status_code}, demo_mode={health_payload.get('demo_mode')}")
+
+        state = client.get(f"{base_url}/api/state", params={"terminal_id": terminal_id})
+        ensure_success(state)
+        print(f"PASS state: HTTP {state.status_code}, ui_mode={state_mode(state.json())}")
+
+        if not (providers.get("qiniu_configured") and providers.get("agent_model_configured")):
+            print("SKIPPED hybrid chat: backend QINIU_API_KEY and MODEL_AGENT are not configured.")
+            return 0
+
+        chat = client.post(
+            f"{base_url}/api/chat",
+            json={"terminal_id": terminal_id, "text": PLAN_TEXT, "source": "text"},
+        )
+        ensure_success(chat)
+        payload = chat.json()
+        if not successful_real_provider_call(payload):
+            provider = (payload.get("data") or {}).get("provider") or {}
+            print(
+                "FAIL hybrid chat: "
+                f"HTTP {chat.status_code}, provider={provider.get('name')}, "
+                f"fallback_used={provider.get('fallback_used')}, events=[{', '.join(event_names(payload))}]"
+            )
+            return 1
+        print(
+            "PASS hybrid chat: "
+            f"HTTP {chat.status_code}, ui_mode={state_mode(payload)}, events=[{', '.join(event_names(payload))}]"
+        )
+    return 0
+
+
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Nini mock demo flow.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--terminal-id", default="demo-kitchen-001")
+    parser.add_argument("--mode", choices=["mock-demo", "hybrid-smoke"], default="mock-demo")
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
+    if args.mode == "hybrid-smoke":
+        return run_hybrid_smoke(args.base_url, args.terminal_id)
     return run_demo(args.base_url, args.terminal_id)
 
 

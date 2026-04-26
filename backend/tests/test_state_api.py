@@ -7,6 +7,7 @@ from backend.app import app
 def _client(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "nini-test.db"))
     monkeypatch.setenv("DEFAULT_TERMINAL_ID", "demo-kitchen-001")
+    monkeypatch.setenv("DEMO_MODE", "mock")
     return TestClient(app)
 
 

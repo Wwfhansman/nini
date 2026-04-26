@@ -45,12 +45,15 @@ Speech
 环境变量：
 
 ```env
+DEMO_MODE=mock
 QINIU_BASE_URL=https://api.qnaigc.com/v1
 QINIU_API_KEY=
 MODEL_FAST_CHAT=
 MODEL_VISION=
 MODEL_AGENT=
 MODEL_AGENT_THINKING=
+PROVIDER_TIMEOUT_SECONDS=30
+ENABLE_PROVIDER_LOGS=true
 ```
 
 Provider 接口建议：
@@ -60,6 +63,16 @@ class ModelProvider:
     def chat_json(self, messages, model, timeout): ...
     def vision(self, image_bytes, prompt, model, timeout): ...
 ```
+
+当前实现：
+
+- `backend/agent/providers.py` 提供 `MockAgentProvider`、`QiniuChatProvider`、`MockVisionProvider`、`QiniuVisionProvider`。
+- 七牛 chat 和 vision 都使用 OpenAI-compatible `/chat/completions`。
+- 请求头使用 `Authorization: Bearer ${QINIU_API_KEY}`，不向前端暴露 key。
+- chat 优先发送 `response_format={"type":"json_object"}`；如果模型返回 400/422，则自动重试无 `response_format` 的 JSON prompt 约束。
+- 真实 provider 返回会经过 `AgentOutput` 或 `VisionObservation` Pydantic 校验。
+- JSON 解析失败、缺 key、HTTP 失败都会记录 provider 事件和 provider log，并 fallback 到 mock，避免破坏 `terminal_state`。
+- provider logs 只记录 provider、model、status、latency、error 摘要，不记录 API key，也不记录图片 base64。
 
 ## 火山 ASR
 
@@ -132,15 +145,40 @@ VOLC_TTS_VOICE_TYPE=zh_female_wanwanxiaohe_moon_bigtts
 - LLM 返回固定 JSON。
 - vision 返回固定 observation。
 - ASR/TTS 可不启用。
+- 不需要任何 API key，mock demo runner 必须始终通过。
 
 ### hybrid
 
 - Agent 使用真实 LLM。
-- vision 或 speech 使用 mock。
+- vision 默认可继续使用 mock；如果配置了 `MODEL_VISION` 和 key，则可调用真实视觉 provider。
+- 真实 provider 失败时 fallback 到 mock。
 
 ### real
 
 - 全部调用真实 provider。
+- 缺少 key 或模型配置时不会崩溃，会记录 provider fallback 事件。
+
+## 验证命令
+
+启动后端：
+
+```bash
+./.venv/bin/uvicorn backend.app:app --reload
+```
+
+mock demo：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+hybrid smoke：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --mode hybrid-smoke --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+无 `QINIU_API_KEY` 或 `MODEL_AGENT` 时，hybrid smoke 会输出 `SKIPPED` 并返回成功；配置后会额外调用一次 `/api/chat`，并要求真实 `provider_call` 成功。若本次 chat fallback 到 mock，脚本会返回失败。
 
 ## Provider 失败处理
 

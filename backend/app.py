@@ -1,4 +1,4 @@
-"""FastAPI application for the phase 0-2 backend."""
+"""FastAPI application for the Nini Kitchen Agent backend."""
 
 from __future__ import annotations
 
@@ -56,6 +56,12 @@ def health() -> dict:
         "ok": True,
         "app_env": settings.app_env,
         "demo_mode": settings.demo_mode,
+        "providers": {
+            "qiniu_configured": settings.qiniu_configured,
+            "agent_model_configured": bool(settings.model_agent),
+            "vision_model_configured": bool(settings.model_vision),
+            "base_url": settings.qiniu_base_url,
+        },
     }
 
 
@@ -77,6 +83,7 @@ def get_api_state(terminal_id: Optional[str] = Query(default=None)) -> ApiRespon
         "memories": database.list_memories(resolved_terminal_id, db_path=settings.db_path),
         "inventory": database.list_inventory_items(resolved_terminal_id, db_path=settings.db_path),
         "recipe_documents": database.list_recipe_documents(resolved_terminal_id, db_path=settings.db_path),
+        "provider_logs": database.list_provider_logs(resolved_terminal_id, db_path=settings.db_path),
         "tool_events": events,
     }
     return ApiResponse(ok=True, data=data, state=state, events=events, error=None)
@@ -111,11 +118,16 @@ async def post_vision(
     settings = get_settings()
     database.init_db(settings.db_path)
     resolved_terminal_id = terminal_id or settings.default_terminal_id
+    image_bytes = None
+    content_type = "image/jpeg"
     if image is not None:
-        await image.read()
+        image_bytes = await image.read()
+        content_type = image.content_type or content_type
     result = runtime.handle_vision(
         resolved_terminal_id,
         purpose=purpose,
+        image_bytes=image_bytes,
+        content_type=content_type,
         db_path=settings.db_path,
     )
     events = _public_events(result["events"])

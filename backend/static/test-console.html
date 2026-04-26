@@ -162,7 +162,11 @@
 <body>
   <header>
     <h1>妮妮 Kitchen Agent Test Console</h1>
-    <span class="status" id="status">ready</span>
+    <div class="row">
+      <span class="pill" id="demoModePill">DEMO_MODE: -</span>
+      <span class="pill" id="providerPill">provider: -</span>
+      <span class="status" id="status">ready</span>
+    </div>
   </header>
   <main>
     <section class="stack">
@@ -238,6 +242,10 @@
         <h3>tool_events</h3>
         <ul id="events"></ul>
       </div>
+      <div class="panel">
+        <h3>provider_logs</h3>
+        <ul id="providerLogs"></ul>
+      </div>
     </section>
   </main>
 
@@ -251,9 +259,12 @@
     const eventsList = document.getElementById("events");
     const memoryMarkdown = document.getElementById("memoryMarkdown");
     const statusEl = document.getElementById("status");
+    const demoModePill = document.getElementById("demoModePill");
+    const providerPill = document.getElementById("providerPill");
     const modePill = document.getElementById("modePill");
     const stepPill = document.getElementById("stepPill");
     const timerPill = document.getElementById("timerPill");
+    const providerLogsList = document.getElementById("providerLogs");
 
     function terminalId() {
       return document.getElementById("terminalId").value.trim() || "demo-kitchen-001";
@@ -298,6 +309,20 @@
         const modelCalled = item.output && item.output.model_called === false ? " model_called=false" : "";
         return `${item.name} [${item.status}]${modelCalled}`;
       });
+      renderList(providerLogsList, data.provider_logs || [], item => {
+        const model = item.model || "-";
+        const latency = item.latency_ms == null ? "-" : item.latency_ms + "ms";
+        const error = item.error ? " " + item.error : "";
+        return `${item.provider}/${model}: ${item.status} ${latency}${error}`;
+      });
+    }
+
+    async function refreshHealth() {
+      const payload = await requestJson("/health");
+      demoModePill.textContent = "DEMO_MODE: " + payload.demo_mode;
+      const providers = payload.providers || {};
+      providerPill.textContent = `qiniu: ${providers.qiniu_configured ? "configured" : "not configured"}`;
+      return payload;
     }
 
     async function requestJson(url, options) {
@@ -411,8 +436,9 @@
       });
     });
 
-    refreshState().catch(error => setStatus(error.message));
+    refreshHealth()
+      .then(() => refreshState())
+      .catch(error => setStatus(error.message));
   </script>
 </body>
 </html>
-

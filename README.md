@@ -59,6 +59,8 @@ python3 -m venv .venv
 ./.venv/bin/uvicorn backend.app:app --reload
 ```
 
+默认使用 `DEMO_MODE=mock`，不需要任何 API key，mock demo 始终应该可跑。
+
 启动后可以访问临时测试控制台：
 
 ```text
@@ -73,11 +75,37 @@ http://127.0.0.1:8000/test-console
 ./.venv/bin/python scripts/run_mock_demo.py --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
 ```
 
+运行 hybrid smoke：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --mode hybrid-smoke --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+未配置七牛 MaaS key 或 `MODEL_AGENT` 时，hybrid smoke 会跳过真实 chat 调用并返回成功，避免影响本地/CI mock 验证。已配置时必须看到真实 `provider_call` 成功；如果 `/api/chat` fallback 到 mock，脚本会返回失败。
+
 运行测试：
 
 ```bash
 ./.venv/bin/pytest backend/tests
 ```
+
+## 七牛 MaaS 配置
+
+复制 `.env.example` 后按需设置环境变量，不提交 `.env`：
+
+```env
+DEMO_MODE=mock
+QINIU_BASE_URL=https://api.qnaigc.com/v1
+QINIU_API_KEY=
+MODEL_AGENT=
+MODEL_VISION=
+PROVIDER_TIMEOUT_SECONDS=30
+```
+
+- `DEMO_MODE=mock`：全部使用 mock provider。
+- `DEMO_MODE=hybrid`：chat 优先走七牛 MaaS，失败时 fallback 到 mock；vision 在配置模型后可走真实 provider，否则保持 mock。
+- `DEMO_MODE=real`：chat 和 vision 优先走七牛 MaaS，失败时记录 provider 事件并 fallback，保证状态不被破坏。
+- 模型 ID 以七牛控制台实际可用名称为准，业务代码不硬编码具体模型。
 
 ## 模型与服务初步选型
 

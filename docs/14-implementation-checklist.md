@@ -157,11 +157,11 @@
 
 ### Qiniu MaaS
 
-- [ ] chat JSON。
-- [ ] vision。
-- [ ] model config。
-- [ ] timeout。
-- [ ] provider logs。
+- [x] chat JSON。
+- [x] vision。
+- [x] model config。
+- [x] timeout。
+- [x] provider logs。
 
 ### Volcengine ASR
 
@@ -176,8 +176,8 @@
 
 验收：
 
-- [ ] `DEMO_MODE=hybrid` 可跑。
-- [ ] `DEMO_MODE=mock` 永远可跑。
+- [x] `DEMO_MODE=hybrid` 可跑。
+- [x] `DEMO_MODE=mock` 永远可跑。
 
 ## 9. 正式前端
 
