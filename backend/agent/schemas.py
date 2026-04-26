@@ -18,6 +18,13 @@ ControlCommand = Literal[
     "finish",
     "reset",
 ]
+MemoryType = Literal[
+    "profile",
+    "preference",
+    "health_goal",
+    "allergy_or_restriction",
+    "cooking_note",
+]
 
 
 class ErrorPayload(BaseModel):
@@ -71,9 +78,74 @@ class ToolEvent(BaseModel):
     created_at: str
 
 
+class MemoryWrite(BaseModel):
+    type: MemoryType
+    subject: str
+    key: str
+    value: Any
+    confidence: float = 1.0
+    source: str = "user_explicit"
+
+
+class InventoryPatch(BaseModel):
+    name: str
+    amount: Optional[str] = None
+    unit: Optional[str] = None
+    category: Optional[str] = None
+    freshness: Optional[str] = None
+    source: str = "user"
+
+
+class RecipeAdjustment(BaseModel):
+    reason: str
+    summary: str
+    changes: List[str] = Field(default_factory=list)
+
+
+class VisionIngredient(BaseModel):
+    name: str
+    amount: str
+    confidence: float = 1.0
+
+
+class VisionObservation(BaseModel):
+    scene: str = "kitchen_counter"
+    ingredients: List[VisionIngredient] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
+class AgentOutput(BaseModel):
+    intent: str
+    ui_mode: UiMode
+    speech: str
+    ui_patch: Dict[str, Any] = Field(default_factory=dict)
+    tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
+    memory_writes: List[MemoryWrite] = Field(default_factory=list)
+    inventory_patches: List[InventoryPatch] = Field(default_factory=list)
+    recipe_adjustments: List[RecipeAdjustment] = Field(default_factory=list)
+
+
 class ControlRequest(BaseModel):
     terminal_id: Optional[str] = None
     command: ControlCommand
+
+
+class ChatRequest(BaseModel):
+    terminal_id: Optional[str] = None
+    text: str
+    source: str = "text"
+
+
+class VisionResponseData(BaseModel):
+    observation: VisionObservation
+    speech: str
+
+
+class KnowledgeRecipeImportRequest(BaseModel):
+    terminal_id: Optional[str] = None
+    title: str
+    content: str
+    source_type: str = "markdown"
 
 
 class ApiResponse(BaseModel):
