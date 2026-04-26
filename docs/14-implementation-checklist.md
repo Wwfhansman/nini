@@ -137,19 +137,21 @@
 
 ## 7. 临时测试页
 
-- [ ] terminal_id 输入。
-- [ ] chat 输入。
-- [ ] 上传图片。
-- [ ] control buttons。
-- [ ] state JSON 面板。
-- [ ] memories 面板。
-- [ ] inventory 面板。
-- [ ] tool_events 面板。
-- [ ] export memory 展示。
+- [x] terminal_id 输入。
+- [x] chat 输入。
+- [x] 上传图片。
+- [x] control buttons。
+- [x] state JSON 面板。
+- [x] memories 面板。
+- [x] inventory 面板。
+- [x] tool_events 面板。
+- [x] export memory 展示。
+- [x] 一键 mock demo 流程。
+- [x] `scripts/run_mock_demo.py` 命令行验证。
 
 验收：
 
-- [ ] 不依赖正式前端即可录制后端闭环。
+- [x] 不依赖正式前端即可录制后端闭环。
 
 ## 8. Real Providers
 

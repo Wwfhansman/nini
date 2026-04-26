@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>妮妮 Kitchen Agent Test Console</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f6f7f9;
+      color: #1f2933;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      background: #ffffff;
+      border-bottom: 1px solid #d9dee7;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(360px, 1fr) minmax(320px, 420px);
+      gap: 12px;
+      padding: 12px;
+    }
+    section {
+      min-width: 0;
+      background: #ffffff;
+      border: 1px solid #d9dee7;
+      border-radius: 6px;
+      padding: 12px;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+    label {
+      display: block;
+      margin: 10px 0 4px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    input,
+    textarea,
+    button {
+      font: inherit;
+    }
+    input[type="text"],
+    textarea {
+      width: 100%;
+      border: 1px solid #c5ccd8;
+      border-radius: 5px;
+      padding: 8px;
+      background: #ffffff;
+    }
+    textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+    button {
+      min-height: 34px;
+      border: 1px solid #9aa6b2;
+      border-radius: 5px;
+      padding: 6px 10px;
+      background: #f7fafc;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: #1f6feb;
+      background: #1f6feb;
+      color: #ffffff;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .status {
+      font-size: 13px;
+      color: #52606d;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      border-radius: 999px;
+      padding: 3px 9px;
+      background: #eef2f7;
+      font-size: 12px;
+    }
+    pre {
+      overflow: auto;
+      max-height: 340px;
+      margin: 0;
+      padding: 10px;
+      border-radius: 5px;
+      background: #101828;
+      color: #eef2ff;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+    .panel {
+      border: 1px solid #e4e7ec;
+      border-radius: 5px;
+      padding: 10px;
+      background: #fbfcfe;
+    }
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    li {
+      margin: 4px 0;
+      font-size: 13px;
+    }
+    @media (max-width: 1100px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+      pre {
+        max-height: 280px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>妮妮 Kitchen Agent Test Console</h1>
+    <span class="status" id="status">ready</span>
+  </header>
+  <main>
+    <section class="stack">
+      <div>
+        <h2>操作区</h2>
+        <label for="terminalId">terminal_id</label>
+        <input id="terminalId" type="text" value="demo-kitchen-001">
+
+        <label for="chatText">文本输入</label>
+        <textarea id="chatText">我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？</textarea>
+        <div class="row">
+          <button class="primary" id="sendChat">发送 chat</button>
+          <button id="refreshState">刷新 state</button>
+        </div>
+      </div>
+
+      <div>
+        <label for="imageInput">vision 图片</label>
+        <input id="imageInput" type="file" accept="image/*">
+        <div class="row">
+          <button id="sendVision">上传 vision</button>
+          <button id="exportMemory">导出记忆</button>
+        </div>
+      </div>
+
+      <div>
+        <h2>控制按钮</h2>
+        <div class="grid">
+          <button data-command="reset">reset</button>
+          <button data-command="start">start</button>
+          <button data-command="next_step">next_step</button>
+          <button data-command="previous_step">previous_step</button>
+          <button data-command="pause">pause</button>
+          <button data-command="resume">resume</button>
+          <button data-command="finish">finish</button>
+        </div>
+        <div class="row">
+          <button class="primary" id="runDemo">一键演示流程</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="stack">
+      <div class="row">
+        <span class="pill" id="modePill">ui_mode: -</span>
+        <span class="pill" id="stepPill">step: -</span>
+        <span class="pill" id="timerPill">timer: -</span>
+      </div>
+      <div class="panel">
+        <h3>当前 state</h3>
+        <pre id="stateJson">{}</pre>
+      </div>
+      <div class="panel">
+        <h3>raw response JSON</h3>
+        <pre id="rawJson">{}</pre>
+      </div>
+      <div class="panel">
+        <h3>memory export Markdown</h3>
+        <pre id="memoryMarkdown"></pre>
+      </div>
+    </section>
+
+    <section class="stack">
+      <div class="panel">
+        <h3>memories</h3>
+        <ul id="memories"></ul>
+      </div>
+      <div class="panel">
+        <h3>inventory</h3>
+        <ul id="inventory"></ul>
+      </div>
+      <div class="panel">
+        <h3>tool_events</h3>
+        <ul id="events"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const PLAN_TEXT = "我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？";
+    const SOUR_TEXT = "记住我不喜欢太酸";
+    const stateJson = document.getElementById("stateJson");
+    const rawJson = document.getElementById("rawJson");
+    const memoriesList = document.getElementById("memories");
+    const inventoryList = document.getElementById("inventory");
+    const eventsList = document.getElementById("events");
+    const memoryMarkdown = document.getElementById("memoryMarkdown");
+    const statusEl = document.getElementById("status");
+    const modePill = document.getElementById("modePill");
+    const stepPill = document.getElementById("stepPill");
+    const timerPill = document.getElementById("timerPill");
+
+    function terminalId() {
+      return document.getElementById("terminalId").value.trim() || "demo-kitchen-001";
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function renderList(element, items, formatter) {
+      element.innerHTML = "";
+      if (!items || items.length === 0) {
+        const empty = document.createElement("li");
+        empty.textContent = "empty";
+        element.appendChild(empty);
+        return;
+      }
+      for (const item of items) {
+        const li = document.createElement("li");
+        li.textContent = formatter(item);
+        element.appendChild(li);
+      }
+    }
+
+    function renderPayload(payload) {
+      rawJson.textContent = JSON.stringify(payload, null, 2);
+      if (payload.state) {
+        stateJson.textContent = JSON.stringify(payload.state, null, 2);
+        modePill.textContent = "ui_mode: " + (payload.state.ui_mode || "-");
+        stepPill.textContent = "step: " + (payload.state.current_step_index ?? "-");
+        timerPill.textContent = "timer: " + (payload.state.timer_status || "-");
+      }
+      const data = payload.data || {};
+      renderList(memoriesList, data.memories || [], item => {
+        const value = item.value_json && (item.value_json.text || JSON.stringify(item.value_json));
+        return `${item.subject}.${item.key}: ${value}`;
+      });
+      renderList(inventoryList, data.inventory || [], item => {
+        return `${item.name}: ${item.amount || ""} ${item.unit || ""}`.trim();
+      });
+      renderList(eventsList, data.tool_events || payload.events || [], item => {
+        const modelCalled = item.output && item.output.model_called === false ? " model_called=false" : "";
+        return `${item.name} [${item.status}]${modelCalled}`;
+      });
+    }
+
+    async function requestJson(url, options) {
+      setStatus("requesting " + url);
+      const response = await fetch(url, options);
+      const contentType = response.headers.get("content-type") || "";
+      const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+      if (!response.ok) {
+        throw new Error(`${response.status}: ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
+      }
+      setStatus("ok");
+      return payload;
+    }
+
+    async function refreshState() {
+      const payload = await requestJson(`/api/state?terminal_id=${encodeURIComponent(terminalId())}`);
+      renderPayload(payload);
+      return payload;
+    }
+
+    async function sendChat(text) {
+      const payload = await requestJson("/api/chat", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({terminal_id: terminalId(), text, source: "text"})
+      });
+      renderPayload(payload);
+      await refreshState();
+      return payload;
+    }
+
+    async function sendVision() {
+      const formData = new FormData();
+      formData.append("terminal_id", terminalId());
+      formData.append("purpose", "ingredients");
+      const fileInput = document.getElementById("imageInput");
+      if (fileInput.files.length > 0) {
+        formData.append("image", fileInput.files[0]);
+      } else {
+        formData.append("image", new Blob(["mock"], {type: "image/jpeg"}), "mock.jpg");
+      }
+      const payload = await requestJson("/api/vision", {method: "POST", body: formData});
+      renderPayload(payload);
+      await refreshState();
+      return payload;
+    }
+
+    async function sendControl(command) {
+      const payload = await requestJson("/api/control", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({terminal_id: terminalId(), command})
+      });
+      renderPayload(payload);
+      await refreshState();
+      return payload;
+    }
+
+    async function exportMemory() {
+      setStatus("exporting memory");
+      const response = await fetch(`/api/export/memory?terminal_id=${encodeURIComponent(terminalId())}`);
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`${response.status}: ${text}`);
+      }
+      memoryMarkdown.textContent = text;
+      rawJson.textContent = text;
+      setStatus("ok");
+      return text;
+    }
+
+    async function runDemo() {
+      const buttons = document.querySelectorAll("button");
+      buttons.forEach(button => button.disabled = true);
+      try {
+        await sendControl("reset");
+        await sendChat(PLAN_TEXT);
+        await sendVision();
+        await sendControl("start");
+        await sendChat(SOUR_TEXT);
+        await sendControl("next_step");
+        await sendControl("pause");
+        await sendControl("resume");
+        await sendControl("finish");
+        await exportMemory();
+        await refreshState();
+        setStatus("demo complete");
+      } finally {
+        buttons.forEach(button => button.disabled = false);
+      }
+    }
+
+    document.getElementById("sendChat").addEventListener("click", () => {
+      sendChat(document.getElementById("chatText").value).catch(error => setStatus(error.message));
+    });
+    document.getElementById("sendVision").addEventListener("click", () => {
+      sendVision().catch(error => setStatus(error.message));
+    });
+    document.getElementById("refreshState").addEventListener("click", () => {
+      refreshState().catch(error => setStatus(error.message));
+    });
+    document.getElementById("exportMemory").addEventListener("click", () => {
+      exportMemory().catch(error => setStatus(error.message));
+    });
+    document.getElementById("runDemo").addEventListener("click", () => {
+      runDemo().catch(error => setStatus(error.message));
+    });
+    document.querySelectorAll("[data-command]").forEach(button => {
+      button.addEventListener("click", () => {
+        sendControl(button.dataset.command).catch(error => setStatus(error.message));
+      });
+    });
+
+    refreshState().catch(error => setStatus(error.message));
+  </script>
+</body>
+</html>
+

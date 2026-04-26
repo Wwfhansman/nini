@@ -26,6 +26,20 @@ frontend-test/
 /test-console
 ```
 
+当前实现采用 FastAPI 静态页面：
+
+```text
+backend/static/test-console.html
+```
+
+启动后端后访问：
+
+```text
+http://127.0.0.1:8000/test-console
+```
+
+临时测试页不是正式前端，不承担最终视觉设计和交互体验，只用于后端闭环调试、演示录制和 API 可观测性检查。
+
 ## 页面结构
 
 ```text
@@ -74,6 +88,33 @@ frontend-test/
 ### 导出记忆
 
 调用 `/api/export/memory` 并显示 Markdown。
+
+### 一键演示流程
+
+测试页提供“一键演示流程”按钮，按顺序调用：
+
+1. `reset`
+2. `/api/chat` 初始规划
+3. `/api/vision` mock 视觉修正
+4. `start`
+5. `/api/chat` 写入“不喜欢太酸”
+6. `next_step`
+7. `pause`
+8. `resume`
+9. `finish`
+10. `/api/export/memory`
+
+如果没有选择图片，页面会上传一个空的 mock 文件；后端当前使用 mock vision，不解析真实图片内容。
+
+## Demo runner
+
+除页面外，还提供命令行验证脚本：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+脚本会输出每一步的 HTTP 状态、`state.ui_mode`、最新事件和关键断言结果，用于快速确认 mock demo 主线仍可复现。
 
 ## 调试成功标准
 

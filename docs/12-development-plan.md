@@ -138,11 +138,13 @@
 
 - 建立 test console。
 - 支持 chat、vision、control、state、export。
+- 提供 `scripts/run_mock_demo.py` 命令行验证完整 mock 流程。
 
 完成标准：
 
 - 能用测试页完整跑通 demo script。
 - 后端日志、数据库、tool_events 与预期一致。
+- demo runner 能在本地 FastAPI 上验证 planning、vision、cooking、memory update、review 和 memory export。
 
 ## 阶段 7：真实模型接入
 

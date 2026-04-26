@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, Query, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend import database
 from backend.agent import runtime
@@ -14,6 +16,9 @@ from backend.agent.schemas import ApiResponse, ChatRequest, ControlRequest, Know
 from backend.config import get_settings
 from backend.skills import memory, recipe_knowledge
 from backend.terminal import state as terminal_state
+
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _init_runtime() -> None:
@@ -29,6 +34,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Nini Kitchen Agent Backend", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def _public_event(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -51,6 +57,11 @@ def health() -> dict:
         "app_env": settings.app_env,
         "demo_mode": settings.demo_mode,
     }
+
+
+@app.get("/test-console", response_class=FileResponse)
+def test_console() -> FileResponse:
+    return FileResponse(STATIC_DIR / "test-console.html")
 
 
 @app.get("/api/state", response_model=ApiResponse)

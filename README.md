@@ -44,6 +44,41 @@
 3. 后端闭环稳定后，再独立设计正式前端终端界面。
 4. 最后联调语音、视觉、真实模型与演示模式。
 
+## 本地运行
+
+安装依赖：
+
+```bash
+python3 -m venv .venv
+./.venv/bin/pip install -r backend/requirements.txt
+```
+
+启动后端：
+
+```bash
+./.venv/bin/uvicorn backend.app:app --reload
+```
+
+启动后可以访问临时测试控制台：
+
+```text
+http://127.0.0.1:8000/test-console
+```
+
+临时测试控制台用于调通后端闭环和录制 mock 演示，不是正式前端。
+
+运行可复现 mock demo：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+运行测试：
+
+```bash
+./.venv/bin/pytest backend/tests
+```
+
 ## 模型与服务初步选型
 
 - LLM/视觉：七牛云 MaaS。
