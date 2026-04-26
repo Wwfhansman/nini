@@ -83,6 +83,14 @@ http://127.0.0.1:8000/test-console
 
 未配置七牛 MaaS key 或 `MODEL_AGENT` 时，hybrid smoke 会跳过真实 chat 调用并返回成功，避免影响本地/CI mock 验证。已配置时必须看到真实 `provider_call` 成功；如果 `/api/chat` fallback 到 mock，脚本会返回失败。
 
+运行 speech smoke：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --mode speech-smoke --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+mock 语音不需要任何 key；配置真实 TTS 后，speech smoke 会要求 TTS 不 fallback。ASR 本轮仍是非流式上传接口和 mock fallback。
+
 运行测试：
 
 ```bash
@@ -106,6 +114,30 @@ PROVIDER_TIMEOUT_SECONDS=30
 - `DEMO_MODE=hybrid`：chat 优先走七牛 MaaS，失败时 fallback 到 mock；vision 在配置模型后可走真实 provider，否则保持 mock。
 - `DEMO_MODE=real`：chat 和 vision 优先走七牛 MaaS，失败时记录 provider 事件并 fallback，保证状态不被破坏。
 - 模型 ID 以七牛控制台实际可用名称为准，业务代码不硬编码具体模型。
+
+## 火山语音配置
+
+本轮是语音接入第一阶段：TTS 优先真实接入，ASR 暂不做 WebSocket 流式，只提供上传接口、Volc provider 边界和 mock fallback。免费额度有限，`speech` 字段应保持短句。
+
+```env
+SPEECH_PROVIDER_MODE=mock
+SPEECH_TIMEOUT_SECONDS=30
+VOLC_TTS_APP_ID=
+VOLC_TTS_ACCESS_KEY=
+VOLC_TTS_ACCESS_TOKEN=
+VOLC_TTS_RESOURCE_ID=seed-tts-1.0
+VOLC_TTS_VOICE_TYPE=zh_female_wanwanxiaohe_moon_bigtts
+VOLC_ASR_APP_KEY=
+VOLC_ASR_ACCESS_KEY=
+VOLC_ASR_RESOURCE_ID=
+```
+
+- `SPEECH_PROVIDER_MODE=mock`：TTS/ASR 都使用 mock，不需要 key。
+- `SPEECH_PROVIDER_MODE=auto|real`：TTS 走火山 V3 `/api/v3/tts/unidirectional`，失败时返回 mock fallback；ASR 当前返回明确占位错误并 fallback mock。
+- `VOLC_TTS_ACCESS_KEY` 是火山文档里的 Access Key；如果你已经填了旧字段名 `VOLC_TTS_ACCESS_TOKEN`，后端也会兼容读取。
+- `VOLC_TTS_RESOURCE_ID` 默认 `seed-tts-1.0`。如果控制台给你的资源 ID 是 `volc.service_type.10029`，就按控制台实际值覆盖。
+- `/api/speech/tts` 限制 300 字以内，避免浪费 TTS 额度。
+- 密钥只在后端读取，不会暴露给 `/test-console`。
 
 ## 模型与服务初步选型
 

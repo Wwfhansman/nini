@@ -103,7 +103,17 @@ class ModelProvider:
 VOLC_ASR_APP_KEY=
 VOLC_ASR_ACCESS_KEY=
 VOLC_ASR_RESOURCE_ID=
+SPEECH_PROVIDER_MODE=mock
+SPEECH_TIMEOUT_SECONDS=30
 ```
+
+当前实现：
+
+- `/api/speech/asr` 接受 multipart 音频上传。
+- `SPEECH_PROVIDER_MODE=mock` 返回固定文本 `下一步`。
+- `SPEECH_PROVIDER_MODE=auto|real` 会进入 `VolcASRProvider` 边界；本阶段不做 WebSocket 流式 ASR，provider 返回明确 `not implemented` 类错误并 fallback mock。
+- provider 事件记录 `speech_asr`，不记录音频内容或 base64。
+- 完整流式 ASR 后续实现。
 
 ## 豆包 TTS 1.0
 
@@ -133,10 +143,24 @@ zh_female_wanwanxiaohe_moon_bigtts
 
 ```env
 VOLC_TTS_APP_ID=
+VOLC_TTS_ACCESS_KEY=
 VOLC_TTS_ACCESS_TOKEN=
-VOLC_TTS_CLUSTER=
+VOLC_TTS_RESOURCE_ID=seed-tts-1.0
 VOLC_TTS_VOICE_TYPE=zh_female_wanwanxiaohe_moon_bigtts
+SPEECH_PROVIDER_MODE=mock
+SPEECH_TIMEOUT_SECONDS=30
 ```
+
+当前实现：
+
+- `/api/speech/tts` 输入 `terminal_id` 和 `text`。
+- `text` 为空返回 400；长度限制为 300 字以内。
+- mock TTS 返回 `provider=mock_tts` 且 `audio_base64=""`，API 不失败，测试台显示 mock 成功。
+- `SPEECH_PROVIDER_MODE=auto|real` 优先调用火山豆包 TTS 1.0 V3 单向短文本接口 `/api/v3/tts/unidirectional`，返回 base64 MP3；失败时 fallback 到 mock。
+- V3 鉴权使用 `X-Api-App-Id`、`X-Api-Access-Key`、`X-Api-Resource-Id`，不再使用旧 V1 `/api/v1/tts`。
+- `VOLC_TTS_RESOURCE_ID` 默认 `seed-tts-1.0`，如果控制台给出 `volc.service_type.10029` 等资源 ID，应按实际值覆盖。
+- `VOLC_TTS_ACCESS_TOKEN` 作为旧字段名兼容保留，推荐使用 `VOLC_TTS_ACCESS_KEY`。
+- provider 事件记录 `speech_tts`，只记录音频是否存在，不记录音频 base64。
 
 ## DEMO_MODE
 
@@ -197,10 +221,12 @@ TTS 失败：
 
 - 前端显示文本。
 - 不阻塞流程。
+- `speech_tts` event 标记 fallback。
 
 ASR 失败：
 
 - 允许文本输入。
+- `speech_asr` event 标记 fallback。
 
 ## 模型调用不要串行过多
 

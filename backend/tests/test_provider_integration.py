@@ -48,6 +48,14 @@ def test_settings_read_provider_environment(monkeypatch):
     monkeypatch.setenv("MODEL_AGENT_THINKING", "thinking-model")
     monkeypatch.setenv("PROVIDER_TIMEOUT_SECONDS", "12.5")
     monkeypatch.setenv("ENABLE_PROVIDER_LOGS", "false")
+    monkeypatch.setenv("VOLC_TTS_APP_ID", "tts-app")
+    monkeypatch.setenv("VOLC_TTS_ACCESS_KEY", "tts-token")
+    monkeypatch.setenv("VOLC_TTS_RESOURCE_ID", "seed-tts-1.0")
+    monkeypatch.setenv("VOLC_ASR_APP_KEY", "asr-app")
+    monkeypatch.setenv("VOLC_ASR_ACCESS_KEY", "asr-key")
+    monkeypatch.setenv("VOLC_ASR_RESOURCE_ID", "asr-resource")
+    monkeypatch.setenv("SPEECH_PROVIDER_MODE", "auto")
+    monkeypatch.setenv("SPEECH_TIMEOUT_SECONDS", "9")
 
     settings = get_settings()
 
@@ -60,9 +68,15 @@ def test_settings_read_provider_environment(monkeypatch):
     assert settings.model_agent_thinking == "thinking-model"
     assert settings.provider_timeout_seconds == 12.5
     assert settings.enable_provider_logs is False
+    assert settings.volc_tts_configured is True
+    assert settings.volc_asr_configured is True
+    assert settings.speech_provider_mode == "auto"
+    assert settings.speech_timeout_seconds == 9
 
     monkeypatch.setenv("DEMO_MODE", "unknown")
     assert get_settings().demo_mode == "mock"
+    monkeypatch.setenv("SPEECH_PROVIDER_MODE", "unknown")
+    assert get_settings().speech_provider_mode == "mock"
 
 
 def test_hybrid_chat_missing_key_falls_back_to_mock_and_logs_error(tmp_path, monkeypatch):

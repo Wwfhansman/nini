@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, Query, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import database
@@ -15,6 +16,8 @@ from backend.agent import runtime
 from backend.agent.schemas import ApiResponse, ChatRequest, ControlRequest, KnowledgeRecipeImportRequest
 from backend.config import get_settings
 from backend.skills import memory, recipe_knowledge
+from backend.speech.providers import MockASRProvider, MockTTSProvider, get_asr_provider, get_tts_provider
+from backend.speech.schemas import SpeechProviderError, TTSRequest
 from backend.terminal import state as terminal_state
 
 
@@ -48,6 +51,47 @@ def _public_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [_public_event(event) for event in events]
 
 
+def _model_to_dict(value: Any) -> Dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "dict"):
+        return value.dict()
+    return dict(value)
+
+
+def _api_error(status_code: int, code: str, message: str, state: Dict[str, Any]) -> JSONResponse:
+    payload = ApiResponse(
+        ok=False,
+        data=None,
+        state=state,
+        events=[],
+        error={"code": code, "message": message},
+    )
+    return JSONResponse(status_code=status_code, content=_model_to_dict(payload))
+
+
+def _record_provider_log(
+    terminal_id: str,
+    provider: str,
+    model: Optional[str],
+    status: str,
+    latency_ms: int,
+    error: Optional[str] = None,
+) -> None:
+    settings = get_settings()
+    if not settings.enable_provider_logs:
+        return
+    database.add_provider_log(
+        provider=provider,
+        model=model,
+        status=status,
+        latency_ms=latency_ms,
+        error=error,
+        terminal_id=terminal_id,
+        db_path=settings.db_path,
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     _init_runtime()
@@ -61,6 +105,10 @@ def health() -> dict:
             "agent_model_configured": bool(settings.model_agent),
             "vision_model_configured": bool(settings.model_vision),
             "base_url": settings.qiniu_base_url,
+            "speech_provider_mode": settings.speech_provider_mode,
+            "volc_tts_configured": settings.volc_tts_configured,
+            "volc_asr_configured": settings.volc_asr_configured,
+            "tts_voice_type": settings.volc_tts_voice_type,
         },
     }
 
@@ -158,6 +206,112 @@ def post_control(request: ControlRequest) -> ApiResponse:
         events=events,
         error=None,
     )
+
+
+@app.post("/api/speech/tts", response_model=ApiResponse)
+def post_speech_tts(request: TTSRequest):
+    settings = get_settings()
+    database.init_db(settings.db_path)
+    terminal_id = request.terminal_id or settings.default_terminal_id
+    state = terminal_state.get_state(terminal_id, db_path=settings.db_path)
+    text = request.text.strip()
+    if not text:
+        return _api_error(400, "invalid_request", "text is required", state)
+    if len(text) > 300:
+        return _api_error(400, "invalid_request", "text must be 300 characters or fewer", state)
+
+    provider = get_tts_provider(settings)
+    fallback_error: Optional[str] = None
+    start_ms = time.perf_counter()
+    try:
+        result = provider.synthesize(text, terminal_id)
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        status = "success"
+        if not isinstance(provider, MockTTSProvider):
+            _record_provider_log(terminal_id, provider.name, provider.model, status, latency_ms)
+    except SpeechProviderError as exc:
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        fallback_error = str(exc)
+        _record_provider_log(terminal_id, exc.provider, exc.model, "error", latency_ms, fallback_error)
+        result = MockTTSProvider().synthesize(text, terminal_id)
+        result.fallback_used = True
+        result.error = fallback_error
+        status = "fallback"
+
+    result_dict = _model_to_dict(result)
+    event = database.add_tool_event(
+        terminal_id=terminal_id,
+        event_type="agent_tool",
+        name="speech_tts",
+        input_json={"text_length": len(text), "voice_type": settings.volc_tts_voice_type},
+        output_json={
+            "provider": result.provider,
+            "attempted_provider": getattr(provider, "name", result.provider),
+            "status": status,
+            "latency_ms": latency_ms,
+            "mime_type": result.mime_type,
+            "audio_present": bool(result.audio_base64),
+            "fallback_used": result.fallback_used,
+            "error": fallback_error[:500] if fallback_error else None,
+        },
+        status=status,
+        db_path=settings.db_path,
+    )
+    return ApiResponse(ok=True, data=result_dict, state=state, events=_public_events([event]), error=None)
+
+
+@app.post("/api/speech/asr", response_model=ApiResponse)
+async def post_speech_asr(
+    terminal_id: Optional[str] = Form(default=None),
+    audio: Optional[UploadFile] = File(default=None),
+) -> ApiResponse:
+    settings = get_settings()
+    database.init_db(settings.db_path)
+    resolved_terminal_id = terminal_id or settings.default_terminal_id
+    state = terminal_state.get_state(resolved_terminal_id, db_path=settings.db_path)
+    audio_bytes = None
+    content_type = "audio/wav"
+    if audio is not None:
+        audio_bytes = await audio.read()
+        content_type = audio.content_type or content_type
+
+    provider = get_asr_provider(settings)
+    fallback_error: Optional[str] = None
+    start_ms = time.perf_counter()
+    try:
+        result = provider.transcribe(audio_bytes, content_type=content_type, terminal_id=resolved_terminal_id)
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        status = "success"
+        if not isinstance(provider, MockASRProvider):
+            _record_provider_log(resolved_terminal_id, provider.name, provider.model, status, latency_ms)
+    except SpeechProviderError as exc:
+        latency_ms = int((time.perf_counter() - start_ms) * 1000)
+        fallback_error = str(exc)
+        _record_provider_log(resolved_terminal_id, exc.provider, exc.model, "error", latency_ms, fallback_error)
+        result = MockASRProvider().transcribe(audio_bytes, content_type=content_type, terminal_id=resolved_terminal_id)
+        result.fallback_used = True
+        result.error = fallback_error
+        status = "fallback"
+
+    result_dict = _model_to_dict(result)
+    event = database.add_tool_event(
+        terminal_id=resolved_terminal_id,
+        event_type="agent_tool",
+        name="speech_asr",
+        input_json={"content_type": content_type, "audio_bytes": len(audio_bytes or b"")},
+        output_json={
+            "provider": result.provider,
+            "attempted_provider": getattr(provider, "name", result.provider),
+            "status": status,
+            "latency_ms": latency_ms,
+            "text": result.text,
+            "fallback_used": result.fallback_used,
+            "error": fallback_error[:500] if fallback_error else None,
+        },
+        status=status,
+        db_path=settings.db_path,
+    )
+    return ApiResponse(ok=True, data=result_dict, state=state, events=_public_events([event]), error=None)
 
 
 @app.get("/api/export/memory", response_class=PlainTextResponse)

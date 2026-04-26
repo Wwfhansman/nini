@@ -301,11 +301,56 @@ def run_hybrid_smoke(base_url: str, terminal_id: str) -> int:
     return 0
 
 
+def run_speech_smoke(base_url: str, terminal_id: str) -> int:
+    base_url = base_url.rstrip("/")
+    with httpx.Client(timeout=10) as client:
+        health = client.get(f"{base_url}/health")
+        ensure_success(health)
+        health_payload = health.json()
+        providers = health_payload.get("providers") or {}
+        speech_mode = providers.get("speech_provider_mode")
+        print(f"PASS health: HTTP {health.status_code}, speech_provider_mode={speech_mode}")
+
+        tts = client.post(
+            f"{base_url}/api/speech/tts",
+            json={"terminal_id": terminal_id, "text": "进入下一步。"},
+        )
+        ensure_success(tts)
+        tts_payload = tts.json()
+        tts_data = tts_payload.get("data") or {}
+        if providers.get("volc_tts_configured") and speech_mode != "mock" and tts_data.get("fallback_used"):
+            print(
+                "FAIL speech tts: "
+                f"provider={tts_data.get('provider')}, fallback_used={tts_data.get('fallback_used')}, "
+                f"error={tts_data.get('error')}"
+            )
+            return 1
+        print(
+            "PASS speech tts: "
+            f"HTTP {tts.status_code}, provider={tts_data.get('provider')}, "
+            f"fallback_used={tts_data.get('fallback_used')}, audio={bool(tts_data.get('audio_base64'))}"
+        )
+
+        asr = client.post(
+            f"{base_url}/api/speech/asr",
+            data={"terminal_id": terminal_id},
+            files={"audio": ("mock.wav", b"mock", "audio/wav")},
+        )
+        ensure_success(asr)
+        asr_data = (asr.json().get("data") or {})
+        print(
+            "PASS speech asr: "
+            f"HTTP {asr.status_code}, provider={asr_data.get('provider')}, "
+            f"fallback_used={asr_data.get('fallback_used')}, text={asr_data.get('text')}"
+        )
+    return 0
+
+
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Nini mock demo flow.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--terminal-id", default="demo-kitchen-001")
-    parser.add_argument("--mode", choices=["mock-demo", "hybrid-smoke"], default="mock-demo")
+    parser.add_argument("--mode", choices=["mock-demo", "hybrid-smoke", "speech-smoke"], default="mock-demo")
     return parser.parse_args(argv)
 
 
@@ -313,6 +358,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
     if args.mode == "hybrid-smoke":
         return run_hybrid_smoke(args.base_url, args.terminal_id)
+    if args.mode == "speech-smoke":
+        return run_speech_smoke(args.base_url, args.terminal_id)
     return run_demo(args.base_url, args.terminal_id)
 
 

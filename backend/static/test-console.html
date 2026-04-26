@@ -89,6 +89,10 @@
       cursor: not-allowed;
       opacity: 0.65;
     }
+    audio {
+      width: 100%;
+      min-width: 180px;
+    }
     .row {
       display: flex;
       flex-wrap: wrap;
@@ -193,6 +197,26 @@
       </div>
 
       <div>
+        <h2>语音调试</h2>
+        <label for="ttsText">TTS 文本</label>
+        <textarea id="ttsText">进入下一步。</textarea>
+        <div class="row">
+          <button id="sendTts">文本转语音</button>
+          <audio id="ttsAudio" controls></audio>
+        </div>
+        <div class="status" id="ttsStatus">TTS ready</div>
+
+        <label for="audioInput">ASR 音频</label>
+        <input id="audioInput" type="file" accept="audio/*">
+        <div class="row">
+          <button id="sendAsr">上传 ASR</button>
+          <button id="sendAsrToChat" disabled>ASR 文本发 chat</button>
+        </div>
+        <label for="asrText">ASR 文本</label>
+        <input id="asrText" type="text" value="">
+      </div>
+
+      <div>
         <h2>控制按钮</h2>
         <div class="grid">
           <button data-command="reset">reset</button>
@@ -265,6 +289,10 @@
     const stepPill = document.getElementById("stepPill");
     const timerPill = document.getElementById("timerPill");
     const providerLogsList = document.getElementById("providerLogs");
+    const ttsAudio = document.getElementById("ttsAudio");
+    const ttsStatus = document.getElementById("ttsStatus");
+    const asrText = document.getElementById("asrText");
+    const sendAsrToChatButton = document.getElementById("sendAsrToChat");
 
     function terminalId() {
       return document.getElementById("terminalId").value.trim() || "demo-kitchen-001";
@@ -321,7 +349,7 @@
       const payload = await requestJson("/health");
       demoModePill.textContent = "DEMO_MODE: " + payload.demo_mode;
       const providers = payload.providers || {};
-      providerPill.textContent = `qiniu: ${providers.qiniu_configured ? "configured" : "not configured"}`;
+      providerPill.textContent = `qiniu: ${providers.qiniu_configured ? "configured" : "not configured"}; speech: ${providers.speech_provider_mode || "-"}`;
       return payload;
     }
 
@@ -394,6 +422,44 @@
       return text;
     }
 
+    async function sendTts() {
+      const payload = await requestJson("/api/speech/tts", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({terminal_id: terminalId(), text: document.getElementById("ttsText").value})
+      });
+      renderPayload(payload);
+      const data = payload.data || {};
+      if (data.audio_base64) {
+        ttsAudio.src = `data:${data.mime_type || "audio/mpeg"};base64,${data.audio_base64}`;
+        ttsStatus.textContent = `${data.provider} audio ready`;
+        ttsAudio.play().catch(() => {
+          ttsStatus.textContent = `${data.provider} audio ready; click play if autoplay is blocked`;
+        });
+      } else {
+        ttsAudio.removeAttribute("src");
+        ttsStatus.textContent = `${data.provider || "tts"} ok; no audio payload`;
+      }
+      await refreshState();
+      return payload;
+    }
+
+    async function sendAsr() {
+      const formData = new FormData();
+      formData.append("terminal_id", terminalId());
+      const fileInput = document.getElementById("audioInput");
+      if (fileInput.files.length > 0) {
+        formData.append("audio", fileInput.files[0]);
+      }
+      const payload = await requestJson("/api/speech/asr", {method: "POST", body: formData});
+      renderPayload(payload);
+      const text = (payload.data && payload.data.text) || "";
+      asrText.value = text;
+      sendAsrToChatButton.disabled = !text;
+      await refreshState();
+      return payload;
+    }
+
     async function runDemo() {
       const buttons = document.querySelectorAll("button");
       buttons.forEach(button => button.disabled = true);
@@ -426,6 +492,15 @@
     });
     document.getElementById("exportMemory").addEventListener("click", () => {
       exportMemory().catch(error => setStatus(error.message));
+    });
+    document.getElementById("sendTts").addEventListener("click", () => {
+      sendTts().catch(error => setStatus(error.message));
+    });
+    document.getElementById("sendAsr").addEventListener("click", () => {
+      sendAsr().catch(error => setStatus(error.message));
+    });
+    sendAsrToChatButton.addEventListener("click", () => {
+      sendChat(asrText.value).catch(error => setStatus(error.message));
     });
     document.getElementById("runDemo").addEventListener("click", () => {
       runDemo().catch(error => setStatus(error.message));

@@ -8,6 +8,8 @@
 
 - chat 输入。
 - vision 上传。
+- TTS 文本转语音。
+- ASR 上传音频识别。
 - control 操作。
 - state 查看。
 - tool_events 查看。
@@ -48,6 +50,8 @@ http://127.0.0.1:8000/test-console
   - 文本输入
   - 发送 chat
   - 上传图片
+  - TTS 文本框和播放控件
+  - ASR 音频上传和发送到 chat
   - control buttons
 
 中间：state JSON
@@ -78,6 +82,14 @@ http://127.0.0.1:8000/test-console
 ### 上传 vision
 
 选择图片，调用 `/api/vision`。
+
+### 语音调试
+
+- TTS 文本默认 `进入下一步。`，调用 `/api/speech/tts`。
+- 如果返回 `audio_base64`，页面直接播放；如果 mock 成功但无音频，则显示成功状态。
+- ASR 上传音频文件，调用 `/api/speech/asr`。
+- ASR 返回文本后，可一键发送到 `/api/chat`。
+- 页面只显示语音 provider 状态，不暴露火山密钥。
 
 ### 控制按钮
 
@@ -126,6 +138,14 @@ hybrid smoke：
 ```
 
 hybrid smoke 会先检查 `/health` 和 `/api/state`。如果后端未配置七牛 key 或 `MODEL_AGENT`，真实 chat 调用会被跳过，不影响 mock demo 验证；如果已配置，则必须出现真实 `provider_call` 成功，fallback 到 mock 会被判定为失败。
+
+speech smoke：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --mode speech-smoke --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+speech smoke 会验证 `/api/speech/tts` 和 `/api/speech/asr`。mock 模式不需要 key；配置真实 TTS 后，如果 TTS fallback 到 mock 会判定失败。ASR 本轮仍允许 mock fallback。
 
 ## 调试成功标准
 

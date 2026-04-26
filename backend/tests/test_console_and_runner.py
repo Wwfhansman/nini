@@ -29,6 +29,8 @@ def test_test_console_is_accessible(tmp_path, monkeypatch):
     assert "一键演示流程" in response.text
     assert "/api/chat" in response.text
     assert "/api/vision" in response.text
+    assert "/api/speech/tts" in response.text
+    assert "/api/speech/asr" in response.text
     assert "DEMO_MODE" in response.text
     assert "provider_logs" in response.text
 
@@ -41,6 +43,7 @@ def test_static_test_console_is_accessible(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert "tool_events" in response.text
     assert "provider_logs" in response.text
+    assert "语音调试" in response.text
 
 
 def test_export_memory_empty_card_is_markdown(tmp_path, monkeypatch):
@@ -280,3 +283,93 @@ def test_successful_real_provider_call_requires_provider_call_event():
     assert successful_real_provider_call(success_payload) is True
     assert successful_real_provider_call(fallback_payload) is False
     assert successful_real_provider_call(mock_payload) is False
+
+
+def test_speech_smoke_accepts_mock_speech(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def get(self, url, params=None):
+            if url.endswith("/health"):
+                return FakeResponse(
+                    {
+                        "providers": {
+                            "speech_provider_mode": "mock",
+                            "volc_tts_configured": False,
+                            "volc_asr_configured": False,
+                        }
+                    }
+                )
+            raise AssertionError(f"unexpected GET {url}")
+
+        def post(self, url, json=None, data=None, files=None):
+            if url.endswith("/api/speech/tts"):
+                return FakeResponse({"data": {"provider": "mock_tts", "fallback_used": False, "audio_base64": ""}})
+            if url.endswith("/api/speech/asr"):
+                return FakeResponse({"data": {"provider": "mock_asr", "fallback_used": False, "text": "下一步"}})
+            raise AssertionError(f"unexpected POST {url}")
+
+    monkeypatch.setattr(runner.httpx, "Client", FakeClient)
+
+    assert runner.run_speech_smoke("http://backend.test", "demo-kitchen-001") == 0
+
+
+def test_speech_smoke_fails_when_configured_tts_falls_back(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def get(self, url, params=None):
+            if url.endswith("/health"):
+                return FakeResponse(
+                    {
+                        "providers": {
+                            "speech_provider_mode": "real",
+                            "volc_tts_configured": True,
+                            "volc_asr_configured": False,
+                        }
+                    }
+                )
+            raise AssertionError(f"unexpected GET {url}")
+
+        def post(self, url, json=None, data=None, files=None):
+            if url.endswith("/api/speech/tts"):
+                return FakeResponse({"data": {"provider": "mock_tts", "fallback_used": True, "error": "failed"}})
+            raise AssertionError(f"unexpected POST {url}")
+
+    monkeypatch.setattr(runner.httpx, "Client", FakeClient)
+
+    assert runner.run_speech_smoke("http://backend.test", "demo-kitchen-001") == 1

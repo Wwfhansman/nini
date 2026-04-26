@@ -240,10 +240,15 @@ text/markdown
 {
   "ok": true,
   "data": {
-    "text": "下一步"
+    "text": "下一步",
+    "provider": "mock_asr",
+    "fallback_used": false,
+    "error": null
   },
   "state": {},
-  "events": [],
+  "events": [
+    {"name": "speech_asr", "status": "success"}
+  ],
   "error": null
 }
 ```
@@ -270,3 +275,26 @@ text/markdown
 - 或临时音频 URL。
 
 省赛实现以最容易前端播放为准。
+
+当前实现返回 base64：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "audio_base64": "",
+    "mime_type": "audio/mpeg",
+    "provider": "mock_tts",
+    "voice_type": "mock",
+    "fallback_used": false,
+    "error": null
+  },
+  "state": {},
+  "events": [
+    {"name": "speech_tts", "status": "success"}
+  ],
+  "error": null
+}
+```
+
+`text` 为空或超过 300 字返回 400，结构仍为 `ApiResponse`。

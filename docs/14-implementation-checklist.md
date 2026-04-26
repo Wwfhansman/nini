@@ -165,19 +165,20 @@
 
 ### Volcengine ASR
 
-- [ ] 录音上传版本。
+- [x] 录音上传版本。
 - [ ] 流式版本可后续。
 
 ### Volcengine TTS
 
-- [ ] 传入 speech。
-- [ ] 返回前端可播放音频。
-- [ ] 音色 `zh_female_wanwanxiaohe_moon_bigtts`。
+- [x] 传入 speech。
+- [x] 返回前端可播放音频。
+- [x] 音色 `zh_female_wanwanxiaohe_moon_bigtts`。
 
 验收：
 
 - [x] `DEMO_MODE=hybrid` 可跑。
 - [x] `DEMO_MODE=mock` 永远可跑。
+- [x] `SPEECH_PROVIDER_MODE=mock` 永远可跑。
 
 ## 9. 正式前端
 
