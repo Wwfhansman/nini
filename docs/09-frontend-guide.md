@@ -162,10 +162,13 @@ frontend/
 
 ## SpeechControls
 
-- TTS：对最近一条 `assistant` 播报 `POST /api/speech/tts`，返回 `audio_base64` 即播放；
-  mock 或 fallback 时只把状态更新为 idle 而不报错。
-- ASR：上传音频文件 → `POST /api/speech/asr`，识别成功后自动作为 chat 文本发出。
-- 不做实时录音、不做打断。
+- 主入口：浏览器 `MediaRecorder` 录音，点击开始/停止后自动走
+  `/api/speech/asr` → `/api/chat` → `/api/speech/tts`。
+- 上传录音：保留本地音频文件上传兜底，识别后复用同一条 voice turn。
+- 重播回复：对最近一条妮妮回复调用 `POST /api/speech/tts`，返回 `audio_base64`
+  即播放；mock 或 fallback 时保留文字回复。
+- 语音状态：待命、请求麦克风、正在听、识别中、理解中、播报中、需要处理。
+- 不做实时流式 ASR、不做打断。
 
 ## Run Demo 按钮
 

@@ -27,12 +27,21 @@ function Waveform({ active }) {
 function VoiceBar({ voiceStatus }) {
   const label =
     {
-      idle: '待机中',
+      idle: '待命',
       listening: '正在听…',
-      thinking: '思考中…',
+      recording: '正在听…',
+      requesting: '请求麦克风…',
+      stopping: '收尾中…',
+      recognizing: '识别中…',
+      thinking: '理解中…',
       speaking: '播报中',
-    }[voiceStatus] || '待机中';
-  const active = voiceStatus === 'listening' || voiceStatus === 'speaking';
+      unsupported: '浏览器不支持录音',
+      denied: '麦克风未授权',
+      error: '需要处理',
+    }[voiceStatus] || '待命';
+  const active = ['listening', 'recording', 'recognizing', 'speaking'].includes(
+    voiceStatus,
+  );
   return (
     <div className="voicebar">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -62,20 +71,51 @@ function VoiceBar({ voiceStatus }) {
   );
 }
 
+const VOICE_HINTS = {
+  planning: ['今晚吃什么', '我最近减脂', '妈妈不吃辣', '看看食材', '就做这个'],
+  vision: ['确认这些食材', '重新看一下', '按这些调整菜谱'],
+  cooking: ['下一步', '等一下', '继续', '这一步再说一遍', '做完了'],
+  review: ['再做一道', '这次太酸了', '下次少放盐', '导出家庭记忆'],
+};
+
+function VoiceHints({ uiMode }) {
+  const hints = VOICE_HINTS[uiMode] || VOICE_HINTS.planning;
+  return (
+    <div className="voice-hints">
+      <span className="voice-hints-label">你可以说</span>
+      <div className="voice-hints-list">
+        {hints.map((hint) => (
+          <span key={hint}>{hint}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function LeftPanel({
   messages,
   voiceStatus,
+  uiMode,
   loading,
   onSend,
+  onVoicePrimary,
   onPickImage,
   onPickAudio,
   onPlayTts,
+  recordingState,
+  recorderError,
+  recordingDurationMs,
   onQuickAction,
-  speechMode,
 }) {
   const [input, setInput] = useState('');
   const listRef = useRef(null);
   const visible = messages.slice(-10);
+  const voiceSecondaryDisabled =
+    loading ||
+    ['requesting', 'recording', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
+      voiceStatus,
+    ) ||
+    ['requesting', 'recording', 'stopping'].includes(recordingState);
 
   useEffect(() => {
     if (listRef.current) {
@@ -125,11 +165,16 @@ export default function LeftPanel({
 
       <SpeechControls
         voiceStatus={voiceStatus}
-        speechMode={speechMode}
+        recordingState={recordingState}
+        recorderError={recorderError}
+        durationMs={recordingDurationMs}
+        onVoicePrimary={onVoicePrimary}
         onPickAudio={onPickAudio}
         onPlayTts={onPlayTts}
         loading={loading}
       />
+
+      <VoiceHints uiMode={uiMode} />
 
       <div className="input-wrap">
         <textarea
@@ -150,8 +195,9 @@ export default function LeftPanel({
             type="button"
             className="icon-btn"
             onClick={onPickAudio}
-            title="上传录音 → ASR"
+            title="上传录音"
             aria-label="upload audio"
+            disabled={voiceSecondaryDisabled}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <rect
@@ -174,7 +220,7 @@ export default function LeftPanel({
             type="button"
             className="icon-btn"
             onClick={onPickImage}
-            title="上传食材图 → Vision"
+            title="看看食材"
             aria-label="upload image"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -192,8 +238,9 @@ export default function LeftPanel({
             type="button"
             className="icon-btn"
             onClick={onPlayTts}
-            title="播放最新语音 → TTS"
+            title="重播回复"
             aria-label="play tts"
+            disabled={voiceSecondaryDisabled}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path

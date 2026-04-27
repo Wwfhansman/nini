@@ -1,10 +1,17 @@
 import React from 'react';
 
 const VOICE_LABELS = {
-  idle: { text: 'IDLE', tone: 'mid' },
-  listening: { text: 'LISTENING', tone: 'terra' },
-  thinking: { text: 'THINKING', tone: 'saffron' },
-  speaking: { text: 'SPEAKING', tone: 'herb' },
+  idle: { text: '待命', tone: 'mid' },
+  listening: { text: '正在听', tone: 'terra' },
+  recording: { text: '正在听', tone: 'terra' },
+  requesting: { text: '请求中', tone: 'terra' },
+  stopping: { text: '识别中', tone: 'saffron' },
+  recognizing: { text: '识别中', tone: 'saffron' },
+  thinking: { text: '理解中', tone: 'saffron' },
+  speaking: { text: '播报中', tone: 'herb' },
+  unsupported: { text: '需要处理', tone: 'danger' },
+  denied: { text: '需要处理', tone: 'danger' },
+  error: { text: '需要处理', tone: 'danger' },
 };
 
 const VOICE_COLORS = {
@@ -12,6 +19,7 @@ const VOICE_COLORS = {
   terra: 'var(--c-terra)',
   saffron: 'var(--c-saffron)',
   herb: 'var(--c-herb)',
+  danger: 'var(--c-danger)',
 };
 
 function statusForUiMode(uiMode, currentStepIndex, totalSteps) {
@@ -86,10 +94,7 @@ export default function TopBar({
         </div>
         <div className="topbar-chip">
           <span className="topbar-chip-label">语音</span>
-          <span
-            className="topbar-chip-val mono"
-            style={{ color: voiceColor }}
-          >
+          <span className="topbar-chip-val" style={{ color: voiceColor }}>
             {voice.text}
           </span>
         </div>

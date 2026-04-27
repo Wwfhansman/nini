@@ -14,6 +14,7 @@ import TopBar from './components/TopBar.jsx';
 import LeftPanel from './components/LeftPanel.jsx';
 import CenterPanel from './components/CenterPanel.jsx';
 import RightPanel from './components/RightPanel.jsx';
+import useVoiceRecorder from './hooks/useVoiceRecorder.js';
 
 const DEMO_PLAN_TEXT =
   '我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？';
@@ -26,6 +27,40 @@ const nowTime = () =>
   });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function audioExtension(mimeType) {
+  if (mimeType?.includes('mp4')) return 'm4a';
+  if (mimeType?.includes('wav')) return 'wav';
+  if (mimeType?.includes('webm')) return 'webm';
+  return 'webm';
+}
+
+function toAudioFile(blob) {
+  if (blob instanceof File) return blob;
+  const type = blob?.type || 'audio/webm';
+  return new File([blob], `voice-turn-${Date.now()}.${audioExtension(type)}`, {
+    type,
+  });
+}
+
+function playAudioBase64({ audio_base64: audioBase64, mime_type: mimeType, fallback_used: fallbackUsed }) {
+  if (!audioBase64 || fallbackUsed || !mimeType) {
+    return Promise.resolve(false);
+  }
+  const src = `data:${mimeType};base64,${audioBase64}`;
+  const audio = new Audio(src);
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (played) => {
+      if (settled) return;
+      settled = true;
+      resolve(played);
+    };
+    audio.onended = () => done(true);
+    audio.onerror = () => done(false);
+    audio.play().catch(() => done(false));
+  });
+}
 
 export default function App() {
   const [terminalId, setTerminalId] = useState(DEFAULT_TERMINAL_ID);
@@ -55,6 +90,13 @@ export default function App() {
 
   const visionInputRef = useRef(null);
   const audioInputRef = useRef(null);
+  const {
+    recordingState,
+    error: recorderError,
+    durationMs,
+    startRecording,
+    stopRecording,
+  } = useVoiceRecorder();
 
   // wall clock
   useEffect(() => {
@@ -145,6 +187,79 @@ export default function App() {
       setError(`刷新状态失败: ${e.message}`);
     }
   }, [terminalId]);
+
+  const appendEvents = useCallback((resp, source) => {
+    const events = Array.isArray(resp?.events) ? resp.events : [];
+    if (!events.length) return;
+    setRecentEvents((prev) => [
+      ...prev,
+      ...events.map((e) => ({ ...e, _source: source })),
+    ]);
+    setHighlightTrigger((n) => n + 1);
+  }, []);
+
+  const appendUserMessage = useCallback((text) => {
+    setChatLog((prev) => [
+      ...prev,
+      { id: `u-${Date.now()}`, role: 'user', text, time: nowTime() },
+    ]);
+  }, []);
+
+  const requestSpeechPlayback = useCallback(
+    async (text, source = 'tts') => {
+      if (!text) return false;
+      const resp = await postSpeechTts(terminalId, text);
+      appendEvents(resp, source);
+      return playAudioBase64(resp?.data || {});
+    },
+    [appendEvents, terminalId],
+  );
+
+  const runRecordedVoiceTurn = useCallback(
+    async (audio, source = 'recording') => {
+      if (!audio) return;
+      setError(null);
+      setLoading(true);
+      try {
+        setVoiceStatus('recognizing');
+        const audioFile = toAudioFile(audio);
+        const asrResp = await postSpeechAsr(terminalId, audioFile);
+        appendEvents(asrResp, `${source}-asr`);
+        const text = (asrResp?.data?.text || '').trim();
+        if (!text) {
+          setError('没有识别到有效语音，请再说一次或上传录音。');
+          setVoiceStatus('idle');
+          return;
+        }
+
+        appendUserMessage(text);
+        setVoiceStatus('thinking');
+        const chatResp = await postChat(terminalId, text, 'voice');
+        applyResponse(chatResp, { source: `${source}-chat` });
+        await syncFullState();
+
+        const speech = chatResp?.data?.speech;
+        if (speech) {
+          setVoiceStatus('speaking');
+          await requestSpeechPlayback(speech, `${source}-tts`);
+        }
+        setVoiceStatus('idle');
+      } catch (e) {
+        setError(`语音会话失败: ${e.message}`);
+        setVoiceStatus('idle');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      appendEvents,
+      appendUserMessage,
+      applyResponse,
+      requestSpeechPlayback,
+      syncFullState,
+      terminalId,
+    ],
+  );
 
   const sendChat = useCallback(
     async (text, options = {}) => {
@@ -242,36 +357,58 @@ export default function App() {
     if (audioInputRef.current) audioInputRef.current.click();
   }, []);
 
+  const handleVoicePrimary = useCallback(async () => {
+    if (recordingState === 'unsupported') {
+      setError('当前浏览器不支持录音，请使用上传录音兜底。');
+      return;
+    }
+    if (recordingState === 'denied') {
+      setError('麦克风权限被拒绝，请使用上传录音兜底。');
+      return;
+    }
+    if (recordingState === 'recording' || voiceStatus === 'recording') {
+      setError(null);
+      setVoiceStatus('stopping');
+      const blob = await stopRecording();
+      if (!blob || blob.size === 0) {
+        setError('没有录到有效语音，请再试一次。');
+        setVoiceStatus('idle');
+        return;
+      }
+      await runRecordedVoiceTurn(blob, 'recording');
+      return;
+    }
+    if (['requesting', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(voiceStatus)) {
+      return;
+    }
+
+    setError(null);
+    setVoiceStatus('requesting');
+    const started = await startRecording();
+    setVoiceStatus(started ? 'recording' : 'idle');
+  }, [
+    recordingState,
+    runRecordedVoiceTurn,
+    startRecording,
+    stopRecording,
+    voiceStatus,
+  ]);
+
+  useEffect(() => {
+    if (recorderError) setError(recorderError);
+  }, [recorderError]);
+
   const handleAudioInputChange = useCallback(
     async (event) => {
       const file = event.target.files?.[0];
       if (!file) return;
-      setError(null);
-      setVoiceStatus('listening');
-      setLoading(true);
       try {
-        const resp = await postSpeechAsr(terminalId, file);
-        const text = resp?.data?.text;
-        const events = Array.isArray(resp.events) ? resp.events : [];
-        if (events.length) {
-          setRecentEvents((prev) => [
-            ...prev,
-            ...events.map((e) => ({ ...e, _source: 'asr' })),
-          ]);
-        }
-        setVoiceStatus('idle');
-        if (text) {
-          await sendChat(text);
-        }
-      } catch (e) {
-        setError(`ASR 失败: ${e.message}`);
-        setVoiceStatus('idle');
+        await runRecordedVoiceTurn(file, 'upload');
       } finally {
-        setLoading(false);
         if (audioInputRef.current) audioInputRef.current.value = '';
       }
     },
-    [terminalId, sendChat],
+    [runRecordedVoiceTurn],
   );
 
   const playLatestSpeech = useCallback(async () => {
@@ -283,29 +420,14 @@ export default function App() {
     setError(null);
     setVoiceStatus('speaking');
     try {
-      const resp = await postSpeechTts(terminalId, last.text);
-      const data = resp?.data || {};
-      const events = Array.isArray(resp.events) ? resp.events : [];
-      if (events.length) {
-        setRecentEvents((prev) => [
-          ...prev,
-          ...events.map((e) => ({ ...e, _source: 'tts' })),
-        ]);
-      }
-      if (data.audio_base64 && !data.fallback_used && data.mime_type) {
-        const src = `data:${data.mime_type};base64,${data.audio_base64}`;
-        const audio = new Audio(src);
-        audio.onended = () => setVoiceStatus('idle');
-        audio.onerror = () => setVoiceStatus('idle');
-        await audio.play().catch(() => setVoiceStatus('idle'));
-      } else {
-        setVoiceStatus('idle');
-      }
+      const played = await requestSpeechPlayback(last.text, 'tts');
+      if (!played) setError('暂无可播放音频，已保留文字回复。');
     } catch (e) {
       setError(`TTS 失败: ${e.message}`);
+    } finally {
       setVoiceStatus('idle');
     }
-  }, [chatLog, terminalId]);
+  }, [chatLog, requestSpeechPlayback]);
 
   const exportMemory = useCallback(async (options = {}) => {
     setError(null);
@@ -382,13 +504,18 @@ export default function App() {
     return dedup;
   }, [toolEventsServer, recentEvents]);
 
+  const voiceDisplayStatus =
+    voiceStatus === 'idle' && ['unsupported', 'denied'].includes(recordingState)
+      ? recordingState
+      : voiceStatus;
+
   return (
     <div className="app-root">
       <TopBar
         appState={state.ui_mode || 'planning'}
         currentStepIndex={state.current_step_index}
         totalSteps={state.recipe?.steps?.length}
-        voiceStatus={voiceStatus}
+        voiceStatus={voiceDisplayStatus}
         currentTime={currentTime}
         mode={mode}
         terminalId={terminalId}
@@ -439,13 +566,17 @@ export default function App() {
         <div className="app-col left">
           <LeftPanel
             messages={chatLog}
-            voiceStatus={voiceStatus}
+            voiceStatus={voiceDisplayStatus}
+            uiMode={state.ui_mode || 'planning'}
             loading={loading}
             onSend={sendChat}
+            onVoicePrimary={handleVoicePrimary}
             onPickImage={triggerImagePicker}
             onPickAudio={triggerAudioPicker}
             onPlayTts={playLatestSpeech}
-            speechMode={health?.providers?.speech_provider_mode}
+            recordingState={recordingState}
+            recorderError={recorderError}
+            recordingDurationMs={durationMs}
             onQuickAction={(action) => {
               if (action === 'planning') sendControl('reset');
               else if (action === 'cooking') sendControl('start');

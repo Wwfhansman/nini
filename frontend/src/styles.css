@@ -583,7 +583,10 @@ textarea:focus, input:focus {
 .speech-controls {
   border-top: 1px solid var(--c-rule);
   padding: 10px 18px;
-  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 6px;
+  align-items: center;
   font-size: 11px; color: var(--c-mid);
   flex-shrink: 0;
 }
@@ -592,10 +595,66 @@ textarea:focus, input:focus {
   background: var(--c-cream);
   padding: 6px 10px;
   font-size: 11px; color: var(--c-ink);
+  white-space: nowrap;
 }
-.speech-controls .speech-status {
-  font-family: var(--font-mono);
+.speech-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.speech-status {
   font-size: 10px;
+  font-weight: 800;
+  color: var(--c-terra);
+}
+.speech-help {
+  font-size: 11px;
+  color: var(--c-mid);
+  line-height: 1.35;
+  word-break: break-word;
+}
+.speech-controls .speech-main {
+  background: var(--c-ink);
+  color: var(--c-cream);
+  border-color: var(--c-ink);
+  min-width: 96px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.speech-controls .speech-main.recording {
+  background: var(--c-terra);
+  border-color: var(--c-terra);
+}
+.voice-hints {
+  margin: 0 18px 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--c-rule);
+  background: rgba(255, 255, 255, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.voice-hints-label {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--c-mid);
+}
+.voice-hints-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.voice-hints-list span {
+  font-size: 11px;
+  color: var(--c-ink);
+  background: var(--c-cream);
+  border: 1px solid var(--c-rule);
+  padding: 3px 7px;
 }
 
 /* Demo bar */
@@ -632,6 +691,8 @@ textarea:focus, input:focus {
 @media (max-width: 960px) {
   .app-col.left { width: 32%; min-width: 240px; }
   .app-col.right { width: 32%; min-width: 240px; }
+  .speech-controls { grid-template-columns: 1fr 1fr; }
+  .speech-copy { grid-column: 1 / -1; }
 }
 @media (max-width: 800px) {
   .app-body { flex-direction: column; }
