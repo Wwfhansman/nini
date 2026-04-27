@@ -3,7 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 from backend.agent import runtime
-from backend.agent.providers import QiniuChatProvider, QiniuVisionProvider
+from backend.agent.providers import QiniuChatProvider, QiniuVisionProvider, normalize_agent_output_payload
 from backend.app import app
 from backend.config import get_settings
 
@@ -133,6 +133,81 @@ def test_qiniu_chat_invalid_json_falls_back_without_state_break(tmp_path, monkey
     assert payload["events"][0]["name"] == "provider_error"
     assert payload["events"][0]["input"]["model"] == "agent-model"
     assert "test-key" not in response.text
+
+
+def test_qiniu_chat_normalizes_common_memory_aliases(tmp_path, monkeypatch):
+    client = _client(
+        tmp_path,
+        monkeypatch,
+        mode="hybrid",
+        qiniu_key="test-key",
+        model_agent="agent-model",
+    )
+
+    def fake_post_chat(self, payload):
+        content = {
+            "intent": "plan_recipe",
+            "ui_mode": "planning",
+            "speech": "我建议做低脂不辣番茄鸡胸肉滑蛋。",
+            "ui_patch": {},
+            "tool_calls": [{"name": "recipe_plan"}],
+            "memory_writes": [
+                {"type": "dietary_goal", "key": "dietary_goal", "content": "减脂"},
+                {"memory_type": "food_restriction", "person": "妈妈", "content": "不吃辣"},
+            ],
+            "inventory_patches": [],
+            "recipe_adjustments": [],
+        }
+        return {"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]}
+
+    monkeypatch.setattr(QiniuChatProvider, "_post_chat", fake_post_chat)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": PLAN_TEXT, "source": "text"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["provider"]["fallback_used"] is False
+    assert payload["events"][0]["name"] == "provider_call"
+    state_payload = client.get("/api/state?terminal_id=demo-kitchen-001").json()["data"]
+    memories = {(memory["subject"], memory["key"]): memory for memory in state_payload["memories"]}
+    assert memories[("user", "health_goal.diet")]["type"] == "health_goal"
+    assert memories[("user", "health_goal.diet")]["value_json"]["text"] == "减脂"
+    assert memories[("mother", "diet.spicy")]["type"] == "allergy_or_restriction"
+    assert memories[("mother", "diet.spicy")]["value_json"]["text"] == "不吃辣"
+    export = client.get("/api/export/memory?terminal_id=demo-kitchen-001")
+    assert export.status_code == 200
+    assert "用户最近在减脂" in export.text
+    assert "妈妈不吃辣" in export.text
+
+
+def test_normalize_agent_output_payload_fills_missing_memory_fields():
+    payload = {
+        "intent": "remember",
+        "ui_mode": "cooking",
+        "speech": "记住了。",
+        "memory_writes": [
+            {"content": "用户不喜欢太酸"},
+            {"type": "food_restriction", "target": "mom", "value": "不吃辣"},
+        ],
+    }
+
+    normalized = normalize_agent_output_payload(payload)
+
+    assert normalized["tool_calls"] == []
+    assert normalized["memory_writes"][0] == {
+        "type": "preference",
+        "subject": "user",
+        "key": "taste.sour",
+        "value": "用户不喜欢太酸",
+        "confidence": 0.9,
+        "source": "user_explicit",
+    }
+    assert normalized["memory_writes"][1]["type"] == "allergy_or_restriction"
+    assert normalized["memory_writes"][1]["subject"] == "mother"
+    assert normalized["memory_writes"][1]["key"] == "diet.spicy"
 
 
 def test_p0_chat_control_does_not_resolve_provider(tmp_path, monkeypatch):

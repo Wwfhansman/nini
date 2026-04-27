@@ -91,11 +91,11 @@ def export_memory_markdown(terminal_id: str, db_path: Optional[str] = None) -> s
         subject = memory.get("subject")
         key = memory.get("key")
         text = _memory_text(memory)
-        if subject == "user" and key == "diet.goal":
+        if subject == "user" and key in {"diet.goal", "health_goal.diet"}:
             lines.append(f"- 用户最近在{text}")
         elif subject == "user" and key == "taste.sour":
             lines.append(f"- 用户{text}")
-        elif subject == "mother" and key == "taste.spicy":
+        elif subject == "mother" and key in {"taste.spicy", "diet.spicy"}:
             lines.append(f"- 妈妈{text}")
         elif key == "tomato_dishes.default_adjustment":
             lines.append(f"- {text}")
@@ -104,4 +104,3 @@ def export_memory_markdown(terminal_id: str, db_path: Optional[str] = None) -> s
     if len(lines) == 2:
         lines.append("- 暂无家庭记忆")
     return "\n".join(lines) + "\n"
-

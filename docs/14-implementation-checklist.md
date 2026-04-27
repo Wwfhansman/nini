@@ -182,24 +182,30 @@
 
 ## 9. 正式前端
 
-- [ ] StatusBar。
-- [ ] Workspace。
-- [ ] PlanningView。
-- [ ] VisionView。
-- [ ] CookingView。
-- [ ] ReviewView。
-- [ ] Sidebar。
-- [ ] ToolTimeline。
-- [ ] MemoryPanel。
-- [ ] InventoryPanel。
-- [ ] ChatBar。
-- [ ] Speech controls。
+位于 `frontend/`，React + Vite，普通 CSS，无外部 CDN，API 通过 `VITE_API_BASE_URL` 注入。
+
+- [x] TopBar（StatusBar）。
+- [x] CenterPanel（Workspace 路由）。
+- [x] PlanningView。
+- [x] VisionView。
+- [x] CookingView。
+- [x] ReviewView。
+- [x] RightPanel（Sidebar）。
+- [x] ToolTimeline。
+- [x] MemoryPanel。
+- [x] InventoryPanel。
+- [x] LeftPanel（ChatBar）。
+- [x] SpeechControls。
+- [x] Run Demo 按钮（一键演示流程）。
+- [x] 终端 ID 在 TopBar 可改。
 
 验收：
 
-- [ ] UI 不像聊天页。
-- [ ] 中间主工作台清晰展示当前动作。
-- [ ] 右侧时间线清楚展示 Agent/状态机工作过程。
+- [x] `npm install` 与 `npm run build` 通过。
+- [x] UI 不像聊天页，三栏布局保留原型视觉风格。
+- [x] 中间主工作台清晰展示当前动作。
+- [x] 右侧时间线清楚展示 Agent/状态机工作过程，P0 控制显示 `LOCAL · 未调用模型`。
+- [x] 启动方式：`cd frontend && npm install && npm run dev`，默认 `http://127.0.0.1:5173`。
 
 ## 10. 演示与提交
 

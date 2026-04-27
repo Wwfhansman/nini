@@ -36,6 +36,111 @@ def _model_validate(model_class: Any, payload: Dict[str, Any]) -> Any:
     return model_class.parse_obj(payload)
 
 
+def _string_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _infer_memory_type(item: Dict[str, Any], value: str) -> str:
+    raw_type = str(item.get("type") or item.get("memory_type") or item.get("category") or "").strip()
+    type_aliases = {
+        "dietary_goal": "health_goal",
+        "diet_goal": "health_goal",
+        "goal": "health_goal",
+        "food_restriction": "allergy_or_restriction",
+        "restriction": "allergy_or_restriction",
+        "dietary_restriction": "allergy_or_restriction",
+        "allergy": "allergy_or_restriction",
+        "taste_preference": "preference",
+        "preference": "preference",
+        "health_goal": "health_goal",
+        "allergy_or_restriction": "allergy_or_restriction",
+        "cooking_note": "cooking_note",
+        "profile": "profile",
+    }
+    if raw_type in type_aliases:
+        return type_aliases[raw_type]
+    text = f"{item.get('key', '')} {value}"
+    if any(token in text for token in ["减脂", "低脂", "控糖", "健康"]):
+        return "health_goal"
+    if any(token in text for token in ["不吃辣", "忌口", "过敏", "不能吃"]):
+        return "allergy_or_restriction"
+    if any(token in text for token in ["不喜欢", "喜欢", "太酸", "酸"]):
+        return "preference"
+    return "cooking_note"
+
+
+def _infer_memory_subject(item: Dict[str, Any], value: str) -> str:
+    subject = str(item.get("subject") or item.get("person") or item.get("target") or "").strip()
+    subject_aliases = {"mom": "mother", "妈妈": "mother", "mother": "mother", "user": "user", "family": "family"}
+    if subject in subject_aliases:
+        return subject_aliases[subject]
+    text = f"{item.get('key', '')} {value}"
+    if "妈妈" in text or "母亲" in text:
+        return "mother"
+    return "user"
+
+
+def _infer_memory_key(memory_type: str, subject: str, value: str) -> str:
+    if memory_type == "health_goal":
+        return "health_goal.diet"
+    if memory_type == "allergy_or_restriction":
+        if "辣" in value:
+            return "diet.spicy"
+        return "diet.restriction"
+    if memory_type == "preference":
+        if "酸" in value:
+            return "taste.sour"
+        return "taste.preference"
+    if memory_type == "profile":
+        return f"{subject}.profile"
+    return "cooking.note"
+
+
+def normalize_agent_output_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(payload)
+    for list_field in ["tool_calls", "memory_writes", "inventory_patches", "recipe_adjustments"]:
+        if normalized.get(list_field) is None:
+            normalized[list_field] = []
+    normalized.setdefault("ui_patch", {})
+
+    memory_writes = []
+    for raw_item in normalized.get("memory_writes") or []:
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        if "value" not in item:
+            for alias in ["content", "text", "memory", "description"]:
+                if alias in item:
+                    item["value"] = item[alias]
+                    break
+        if "value" not in item:
+            continue
+        value = _string_value(item["value"])
+        memory_type = _infer_memory_type(item, value)
+        subject = _infer_memory_subject(item, value)
+        key = str(item.get("key") or item.get("name") or "").strip() or _infer_memory_key(memory_type, subject, value)
+        if key in {"dietary_goal", "diet_goal"}:
+            key = "health_goal.diet"
+        elif key in {"food_restriction", "restriction"}:
+            key = "diet.spicy" if "辣" in value else "diet.restriction"
+        elif key in {"sour_preference", "taste_sour"}:
+            key = "taste.sour"
+        memory_writes.append(
+            {
+                "type": memory_type,
+                "subject": subject,
+                "key": key,
+                "value": value,
+                "confidence": float(item.get("confidence", 0.9) or 0.9),
+                "source": item.get("source") or item.get("provenance") or "user_explicit",
+            }
+        )
+    normalized["memory_writes"] = memory_writes
+    return normalized
+
+
 def extract_json_object(text: str) -> Dict[str, Any]:
     content = text.strip()
     if content.startswith("```"):
@@ -146,6 +251,7 @@ class QiniuChatProvider(BaseAgentProvider):
             response_json = self._post_chat(self._payload(messages, response_format=False))
         try:
             payload = extract_json_object(_message_content(response_json, self.name, self.model))
+            payload = normalize_agent_output_payload(payload)
             return _model_validate(AgentOutput, payload)
         except Exception as exc:
             raise ProviderError(f"invalid AgentOutput JSON: {exc}", self.name, self.model) from exc

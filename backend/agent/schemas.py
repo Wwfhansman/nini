@@ -17,6 +17,7 @@ ControlCommand = Literal[
     "resume",
     "finish",
     "reset",
+    "repeat_current_step",
 ]
 MemoryType = Literal[
     "profile",

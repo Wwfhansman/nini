@@ -44,6 +44,9 @@
 3. 后端闭环稳定后，再独立设计正式前端终端界面。
 4. 最后联调语音、视觉、真实模型与演示模式。
 
+正式演示终端在 `frontend/`，调试用临时页面在 `/test-console`，两者并存：
+正式终端用于答辩与录制，`/test-console` 用于调试后端事件与一键 mock demo。
+
 ## 本地运行
 
 安装依赖：
@@ -96,6 +99,45 @@ mock 语音不需要任何 key；配置真实 TTS 后，speech smoke 会要求 T
 ```bash
 ./.venv/bin/pytest backend/tests
 ```
+
+## 正式前端
+
+`frontend/` 是省赛演示用的厨房终端 UI（React + Vite，普通 CSS，零外部 CDN）。
+后端默认监听 `http://127.0.0.1:8000`，前端通过 `VITE_API_BASE_URL` 指向它。
+
+安装依赖并启动开发服务器：
+
+```bash
+cd frontend
+npm install
+npm run dev
+# http://127.0.0.1:5173
+```
+
+构建生产包：
+
+```bash
+cd frontend
+npm run build
+npm run preview   # 可选，预览 dist/ 静态包
+```
+
+默认配置下，Vite 把 `/api`、`/health`、`/test-console`、`/static` 反代到
+`http://127.0.0.1:8000`，浏览器看到的是同源，无需在后端开 CORS。
+切换上游地址（例如 8000 端口被占）：
+
+```bash
+cd frontend
+cp .env.example .env
+# 修改 VITE_API_PROXY_TARGET=http://127.0.0.1:8001
+```
+
+如果要把构建产物部署到与后端不同源的地方，再用 `VITE_API_BASE_URL` 覆盖为绝对地址，
+并自行解决 CORS。
+
+正式前端与 `/test-console` 并存：
+- `frontend/` 是面向答辩演示的终端 UI，含一键运行 demo、对话、视觉、烹饪、复盘。
+- `/test-console` 仍然保留，用于直接观察 raw state / events / provider logs。
 
 ## 七牛 MaaS 配置
 

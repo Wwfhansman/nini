@@ -9,21 +9,10 @@ from backend import database
 from backend.agent.prompts import render_agent_messages
 from backend.agent.providers import MockAgentProvider, MockVisionProvider, ProviderError, get_agent_provider, get_vision_provider
 from backend.agent.schemas import AgentOutput, ChatRequest
+from backend.agent.voice_router import route_voice_text
 from backend.config import get_settings
 from backend.skills import inventory, memory, recipe, vision
 from backend.terminal import state as terminal_state
-
-
-P0_COMMANDS = {
-    "开始": "start",
-    "开始做": "start",
-    "下一步": "next_step",
-    "上一步": "previous_step",
-    "暂停": "pause",
-    "继续": "resume",
-    "完成": "finish",
-}
-P0_TRAILING_PUNCTUATION = "。！？!?.,，；;：:、 "
 
 
 def _model_to_dict(value: Any) -> Dict[str, Any]:
@@ -105,8 +94,10 @@ def _provider_error_event(
 
 
 def detect_p0_command(text: str) -> Optional[str]:
-    normalized = text.strip().strip(P0_TRAILING_PUNCTUATION)
-    return P0_COMMANDS.get(normalized)
+    route = route_voice_text(text)
+    if route.route == "local_control":
+        return route.command
+    return None
 
 
 def _vision_speech(observation_dict: Dict[str, Any]) -> str:
@@ -136,11 +127,13 @@ def handle_chat(
     settings = get_settings()
     resolved_db_path = db_path or settings.db_path
     terminal_id = request.terminal_id or settings.default_terminal_id
-    command = detect_p0_command(request.text)
-    if command:
-        return terminal_state.apply_control(command, terminal_id, db_path=resolved_db_path)
-
     state = terminal_state.get_state(terminal_id, db_path=resolved_db_path)
+    voice_route = route_voice_text(request.text, state)
+    if voice_route.route == "local_control" and voice_route.command:
+        result = terminal_state.apply_control(voice_route.command, terminal_id, db_path=resolved_db_path)
+        result["data"]["voice_route"] = voice_route.to_dict()
+        return result
+
     database.add_conversation(
         terminal_id,
         "user",

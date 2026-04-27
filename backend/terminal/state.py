@@ -179,6 +179,22 @@ def resume_timer(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, A
     return database.save_state(terminal_id, state, db_path=db_path)
 
 
+def repeat_current_step(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]:
+    return get_state(terminal_id, db_path=db_path)
+
+
+def current_step_speech(state: Dict[str, Any]) -> str:
+    recipe = state.get("recipe") or {}
+    steps = recipe.get("steps") or []
+    if not steps:
+        return "当前还没有烹饪步骤，请先规划一道菜。"
+    index = min(max(int(state.get("current_step_index", 0)), 0), len(steps) - 1)
+    step = steps[index]
+    title = step.get("title") or f"第{index + 1}步"
+    instruction = step.get("instruction") or "这一步暂时没有详细说明。"
+    return f"当前步骤：{title}。{instruction}"
+
+
 def finish_cooking(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]:
     state = get_state(terminal_id, db_path=db_path)
     state["ui_mode"] = "review"
@@ -197,14 +213,16 @@ def apply_control(command: str, terminal_id: str, db_path: Optional[str] = None)
         "resume": resume_timer,
         "finish": finish_cooking,
         "reset": reset_state,
+        "repeat_current_step": repeat_current_step,
     }
     if command not in handlers:
         raise ValueError(f"Unsupported control command: {command}")
 
     state = handlers[command](terminal_id, db_path=db_path)
+    speech = current_step_speech(state) if command == "repeat_current_step" else state.get("last_speech", "")
     output_json = {
         "model_called": False,
-        "speech": state.get("last_speech", ""),
+        "speech": speech,
     }
     event = database.add_tool_event(
         terminal_id=terminal_id,
