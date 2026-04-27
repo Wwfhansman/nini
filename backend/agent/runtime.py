@@ -120,6 +120,38 @@ def _vision_speech(observation_dict: Dict[str, Any]) -> str:
     return "我没有识别到明确食材，先保持当前菜谱。"
 
 
+def _handle_start_vision(
+    terminal_id: str,
+    state: Dict[str, Any],
+    voice_route: Any,
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    speech = "好的，我来看看台面上的食材。请把食材放到镜头前。"
+    next_state = dict(state)
+    next_state["ui_mode"] = "vision"
+    next_state["last_speech"] = speech
+    next_state = database.save_state(terminal_id, next_state, db_path=db_path)
+    output_json = {
+        "model_called": False,
+        "speech": speech,
+        "voice_route": voice_route.to_dict(),
+    }
+    event = database.add_tool_event(
+        terminal_id=terminal_id,
+        event_type="local_control",
+        name="start_vision",
+        input_json={"intent": "start_vision", "text": voice_route.normalized_text},
+        output_json=output_json,
+        status="success",
+        db_path=db_path,
+    )
+    return {
+        "data": output_json,
+        "state": next_state,
+        "events": [event],
+    }
+
+
 def handle_chat(
     request: ChatRequest,
     db_path: Optional[str] = None,
@@ -133,6 +165,8 @@ def handle_chat(
         result = terminal_state.apply_control(voice_route.command, terminal_id, db_path=resolved_db_path)
         result["data"]["voice_route"] = voice_route.to_dict()
         return result
+    if voice_route.intent == "start_vision":
+        return _handle_start_vision(terminal_id, state, voice_route, resolved_db_path)
 
     database.add_conversation(
         terminal_id,

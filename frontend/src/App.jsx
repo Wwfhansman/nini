@@ -62,6 +62,13 @@ function playAudioBase64({ audio_base64: audioBase64, mime_type: mimeType, fallb
   });
 }
 
+function serviceModeLabel(mode) {
+  const normalized = (mode || 'mock').toLowerCase();
+  if (normalized === 'real') return '在线模式';
+  if (normalized === 'hybrid') return '混合模式';
+  return '演示模式';
+}
+
 export default function App() {
   const [terminalId, setTerminalId] = useState(DEFAULT_TERMINAL_ID);
   const [health, setHealth] = useState(null);
@@ -112,7 +119,7 @@ export default function App() {
         const h = await getHealth();
         if (!cancelled) setHealth(h);
       } catch (e) {
-        if (!cancelled) setError(`无法连接后端 /health: ${e.message}`);
+        if (!cancelled) setError(`暂时无法连接厨房服务: ${e.message}`);
       }
     })();
     return () => {
@@ -146,6 +153,15 @@ export default function App() {
       if (!resp) return;
       if (resp.state) setState(resp.state);
       const events = Array.isArray(resp.events) ? resp.events : [];
+      const startsVision =
+        resp?.data?.voice_route?.intent === 'start_vision' ||
+        events.some((event) => event.name === 'start_vision');
+      if (startsVision) {
+        setLastObservation(null);
+        setLastVisionPreview(null);
+        setPendingImage(null);
+        if (visionInputRef.current) visionInputRef.current.value = '';
+      }
       if (events.length) {
         setRecentEvents((prev) => [
           ...prev,
@@ -306,8 +322,8 @@ export default function App() {
     async (file, options = {}) => {
       const f = file || pendingImage;
       if (!f) {
-        setError('请先选择一张食材照片');
-        if (options.throwOnError) throw new Error('请先选择一张食材照片');
+        setError('请先选择一张食材画面');
+        if (options.throwOnError) throw new Error('请先选择一张食材画面');
         return;
       }
       setError(null);
@@ -423,7 +439,7 @@ export default function App() {
       const played = await requestSpeechPlayback(last.text, 'tts');
       if (!played) setError('暂无可播放音频，已保留文字回复。');
     } catch (e) {
-      setError(`TTS 失败: ${e.message}`);
+      setError(`语音播报失败: ${e.message}`);
     } finally {
       setVoiceStatus('idle');
     }
@@ -452,38 +468,37 @@ export default function App() {
       try {
         await fn();
       } catch (e) {
-        setError(`Demo 步骤「${label}」失败: ${e.message}`);
+        setError(`演示步骤「${label}」失败: ${e.message}`);
         throw e;
       }
       await sleep(gap);
     };
     try {
-      await step('reset', () => sendControl('reset', { throwOnError: true }));
-      await step('chat: 家庭约束', () => sendChat(DEMO_PLAN_TEXT, { throwOnError: true }), 800);
+      await step('重置终端', () => sendControl('reset', { throwOnError: true }));
+      await step('规划晚餐', () => sendChat(DEMO_PLAN_TEXT, { throwOnError: true }), 800);
       if (pendingImage) {
-        await step('vision', () => sendVision(pendingImage, { throwOnError: true }), 800);
+        await step('查看食材', () => sendVision(pendingImage, { throwOnError: true }), 800);
       } else {
-        setDemoStep('skip vision (no image)');
+        setDemoStep('跳过查看食材');
         await sleep(400);
       }
-      await step('control: start', () => sendControl('start', { throwOnError: true }));
-      await step('chat: 不喜欢太酸', () => sendChat(DEMO_SOUR_TEXT, { throwOnError: true }), 800);
-      await step('control: next_step', () => sendControl('next_step', { throwOnError: true }));
-      await step('control: pause', () => sendControl('pause', { throwOnError: true }));
-      await step('control: resume', () => sendControl('resume', { throwOnError: true }));
-      await step('control: finish', () => sendControl('finish', { throwOnError: true }));
-      await step('export memory', () => exportMemory({ throwOnError: true }));
-      setDemoStep('done');
+      await step('开始烹饪', () => sendControl('start', { throwOnError: true }));
+      await step('记住口味', () => sendChat(DEMO_SOUR_TEXT, { throwOnError: true }), 800);
+      await step('进入下一步', () => sendControl('next_step', { throwOnError: true }));
+      await step('暂停', () => sendControl('pause', { throwOnError: true }));
+      await step('继续', () => sendControl('resume', { throwOnError: true }));
+      await step('完成复盘', () => sendControl('finish', { throwOnError: true }));
+      await step('导出家庭记忆', () => exportMemory({ throwOnError: true }));
+      setDemoStep('完成');
     } catch {
-      setDemoStep('error');
+      setDemoStep('需要处理');
     } finally {
       setDemoRunning(false);
     }
   }, [demoRunning, sendControl, sendChat, sendVision, exportMemory, pendingImage]);
 
   const mode = useMemo(() => {
-    const dm = (health?.demo_mode || 'mock').toLowerCase();
-    return dm.charAt(0).toUpperCase() + dm.slice(1);
+    return serviceModeLabel(health?.demo_mode);
   }, [health]);
 
   const memories = apiData?.memories || [];
@@ -539,7 +554,7 @@ export default function App() {
           disabled={demoRunning}
           onClick={runDemoFlow}
         >
-          {demoRunning ? '运行中…' : '一键运行 Demo'}
+          {demoRunning ? '运行中…' : '一键演示'}
         </button>
         <button
           type="button"
@@ -547,7 +562,7 @@ export default function App() {
           disabled={demoRunning || loading}
           onClick={triggerImagePicker}
         >
-          {pendingImage ? '已选择食材图' : '选择食材图（可选）'}
+          {pendingImage ? '已选择食材画面' : '选择食材画面（可选）'}
         </button>
         <button
           type="button"
@@ -558,7 +573,7 @@ export default function App() {
           重置
         </button>
         {demoStep ? (
-          <span className="demo-step">step: {demoStep}</span>
+          <span className="demo-step">进度：{demoStep}</span>
         ) : null}
       </div>
 

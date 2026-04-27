@@ -13,12 +13,14 @@ export default function VisionView({
   const adjustments = state?.active_adjustments || [];
   const ingredients = lastObservation?.ingredients || [];
   const notes = lastObservation?.notes || [];
-  const visionEvent = (recentEvents || [])
-    .filter((e) => e.name === 'vision_observe')
+  const latestVisionEvent = (recentEvents || [])
+    .filter((e) => e.name === 'vision_observe' || e.name === 'start_vision')
     .slice(-1)[0];
   const observation = ingredients.length
     ? lastObservation
-    : visionEvent?.output?.observation || null;
+    : latestVisionEvent?.name === 'vision_observe'
+    ? latestVisionEvent?.output?.observation || null
+    : null;
   const observationIngredients = observation?.ingredients || [];
   const observationNotes = observation?.notes || notes;
 
@@ -27,12 +29,12 @@ export default function VisionView({
     : ['标准方案'];
   const afterLines = adjustments.length
     ? adjustments.slice(0, 4)
-    : ['等待识别结果'];
+    : ['等待食材画面'];
 
   return (
     <div className="view-wrap">
       <div className="view-header">
-        <div className="view-eyebrow saffron">视觉识别</div>
+        <div className="view-eyebrow saffron">终端视觉</div>
         <div className="view-title">我正在查看台面上的食材</div>
       </div>
 
@@ -44,12 +46,12 @@ export default function VisionView({
             ) : (
               <div className="cam-empty">
                 <div className="glyph">▣</div>
-                请选择一张食材照片
+                等待食材画面
               </div>
             )}
           </div>
           <div className="cam-label">
-            VISION · {state?.last_speech ? 'capture ready' : 'awaiting frame'}
+            Web 演示中使用图片模拟终端摄像头画面
           </div>
           <div className="vision-upload">
             <button
@@ -58,7 +60,7 @@ export default function VisionView({
               onClick={onPickImage}
               disabled={loading}
             >
-              选择图片
+              选择一张食材画面
             </button>
             <button
               type="button"
@@ -66,16 +68,16 @@ export default function VisionView({
               onClick={onUploadVision}
               disabled={loading || !visionPreview}
             >
-              {loading ? '识别中…' : '上传识别'}
+              {loading ? '识别中…' : '开始识别'}
             </button>
           </div>
         </div>
 
         <div className="vision-right">
           <div className="info-block">
-            <div className="info-title">识别结果</div>
+            <div className="info-title">看到的食材</div>
             {observationIngredients.length === 0 ? (
-              <div className="mem-empty">暂无识别结果，先上传一张图</div>
+              <div className="mem-empty">请先选择食材画面，妮妮会根据看到的食材调整方案</div>
             ) : (
               observationIngredients.map((it) => {
                 const warn =
@@ -98,7 +100,7 @@ export default function VisionView({
 
           {observationNotes?.length ? (
             <div className="info-block">
-              <div className="info-title">识别备注</div>
+              <div className="info-title">观察备注</div>
               {observationNotes.map((n, i) => (
                 <div className="mem-row" key={i}>
                   <span className="dash">—</span>
@@ -109,10 +111,10 @@ export default function VisionView({
           ) : null}
 
           <div className="info-block">
-            <div className="info-title">菜谱已自动修正</div>
+            <div className="info-title">对菜谱的影响</div>
             <div className="ba-grid">
               <div>
-                <div className="ba-col-title">Before</div>
+                <div className="ba-col-title">原计划</div>
                 {beforeLines.map((t, i) => (
                   <div className="ba-line before" key={i}>
                     {t}
@@ -121,7 +123,7 @@ export default function VisionView({
               </div>
               <div className="ba-arrow">→</div>
               <div>
-                <div className="ba-col-title after">After</div>
+                <div className="ba-col-title after">已根据食材调整</div>
                 {afterLines.map((t, i) => (
                   <div className="ba-line after" key={i}>
                     {t}

@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import app
@@ -142,6 +143,26 @@ def test_repeat_prompt_in_review_stays_on_agent_path(tmp_path, monkeypatch):
     assert payload["data"]["intent"] == "small_reply"
     assert payload["state"]["ui_mode"] == "review"
     assert not any(event["event_type"] == "local_control" for event in payload["events"])
+
+
+@pytest.mark.parametrize("text", ["看看食材", "妮妮，看一下台面。", "我现在有什么菜"])
+def test_vision_voice_request_enters_vision_without_provider(tmp_path, monkeypatch, text):
+    client = _client(tmp_path, monkeypatch)
+    _control(client, "reset")
+
+    response = _chat(client, text)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"]["ui_mode"] == "vision"
+    assert payload["data"]["model_called"] is False
+    assert payload["data"]["voice_route"]["route"] == "frontend_action"
+    assert payload["data"]["voice_route"]["intent"] == "start_vision"
+    assert payload["events"][0]["event_type"] == "local_control"
+    assert payload["events"][0]["name"] == "start_vision"
+    assert payload["events"][0]["output"]["model_called"] is False
+    assert "镜头前" in payload["data"]["speech"]
+    assert not any(event["name"] == "provider_call" for event in payload["events"])
 
 
 def test_complex_voice_request_stays_on_agent_path(tmp_path, monkeypatch):

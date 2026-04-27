@@ -1,34 +1,36 @@
 import React from 'react';
 
 const EVENT_LABELS = {
-  memory_write: { label: '写入家庭记忆', tool: 'memory_write' },
-  inventory_update: { label: '更新当前库存', tool: 'inventory_update' },
-  recipe_plan: { label: '生成晚餐方案', tool: 'recipe_plan' },
-  recipe_adjust: { label: '修正菜谱步骤', tool: 'recipe_adjust' },
-  vision_observe: { label: '分析食材照片', tool: 'vision_observe' },
-  speech_tts: { label: '生成语音播报', tool: 'speech_tts' },
-  speech_asr: { label: '识别语音输入', tool: 'speech_asr' },
-  provider_call: { label: '调用任务模型', tool: 'provider_call' },
-  provider_error: { label: 'Provider 回退', tool: 'provider_error' },
+  memory_write: { label: '记住家庭偏好', tool: '家庭记忆' },
+  inventory_update: { label: '更新食材库存', tool: '食材库存' },
+  recipe_plan: { label: '生成晚餐方案', tool: '晚餐方案' },
+  recipe_adjust: { label: '调整烹饪方案', tool: '烹饪方案' },
+  vision_observe: { label: '识别食材画面', tool: '终端视觉' },
+  speech_tts: { label: '生成语音回复', tool: '语音播报' },
+  speech_asr: { label: '理解语音输入', tool: '语音理解' },
+  provider_call: { label: '智能服务响应', tool: '智能服务' },
+  provider_error: { label: '启用本地兜底', tool: '本地兜底' },
   vision_provider_fallback: {
-    label: 'Vision 回退到 Mock',
-    tool: 'vision_fallback',
+    label: '视觉服务兜底',
+    tool: '本地兜底',
   },
   recipe_knowledge_import: {
     label: '导入家庭菜谱',
-    tool: 'recipe_knowledge',
+    tool: '家庭菜谱',
   },
-  start: { label: '本地状态机：开始', tool: 'state_machine', local: true },
-  next_step: { label: '本地状态机：下一步', tool: 'state_machine', local: true },
+  start_vision: { label: '准备查看食材', tool: '终端视觉', local: true },
+  start: { label: '开始烹饪', tool: '本地即时响应', local: true },
+  next_step: { label: '进入下一步', tool: '本地即时响应', local: true },
   previous_step: {
-    label: '本地状态机：上一步',
-    tool: 'state_machine',
+    label: '回到上一步',
+    tool: '本地即时响应',
     local: true,
   },
-  pause: { label: '本地状态机：暂停', tool: 'state_machine', local: true },
-  resume: { label: '本地状态机：继续', tool: 'state_machine', local: true },
-  finish: { label: '本地状态机：完成', tool: 'state_machine', local: true },
-  reset: { label: '本地状态机：重置', tool: 'state_machine', local: true },
+  pause: { label: '暂停烹饪', tool: '本地即时响应', local: true },
+  resume: { label: '继续烹饪', tool: '本地即时响应', local: true },
+  finish: { label: '完成复盘', tool: '本地即时响应', local: true },
+  reset: { label: '重新规划', tool: '本地即时响应', local: true },
+  repeat_current_step: { label: '重复当前步骤', tool: '本地即时响应', local: true },
 };
 
 function describe(event) {
@@ -43,6 +45,13 @@ function describe(event) {
   return { ...map, local: isLocal };
 }
 
+function statusText(status, isError) {
+  if (status === 'success') return '已完成';
+  if (status === 'fallback') return '本地兜底';
+  if (status === 'error') return '需要处理';
+  return isError ? '需要处理' : status;
+}
+
 export default function ToolTimeline({ events }) {
   const list = (events || []).slice(-12);
   const lastIdx = list.length - 1;
@@ -50,20 +59,20 @@ export default function ToolTimeline({ events }) {
   return (
     <div className="rp-section" style={{ flex: '0 0 auto' }}>
       <div className="rp-head">
-        <span className="section-label">Agent 任务编排</span>
+        <span className="section-label">任务进程</span>
         {list.length ? (
           <span className="rp-aux live">
-            <span className="dot">●</span> 实时流
+            <span className="dot">●</span> 实时更新
           </span>
         ) : (
-          <span className="rp-aux">idle</span>
+          <span className="rp-aux">待命</span>
         )}
       </div>
 
       <div className="timeline">
         {list.length === 0 ? (
           <div className="timeline-empty">
-            等待 Agent 与状态机事件… 触发对话或控制后，这里会出现实时编排。
+            等待语音、视觉或烹饪动作。触发后，这里会显示妮妮的处理进程。
           </div>
         ) : (
           list.map((event, i) => {
@@ -91,9 +100,9 @@ export default function ToolTimeline({ events }) {
               if (event.name === 'inventory_update' && out.items?.length)
                 return `${out.items.length} 项库存`;
               if (event.name === 'provider_call' && out.latency_ms)
-                return `latency ${out.latency_ms}ms`;
+                return `响应 ${out.latency_ms}ms`;
               if (event.name === 'provider_error')
-                return (out.error || '').slice(0, 60);
+                return '已用本地方案继续';
               return null;
             })();
             return (
@@ -112,13 +121,13 @@ export default function ToolTimeline({ events }) {
                   <div className="timeline-tags">
                     {meta.local ? (
                       <span className="tag-mini local">
-                        LOCAL · 未调用模型
+                        本地即时响应
                       </span>
                     ) : (
                       <span className="tag-mini tool">{meta.tool}</span>
                     )}
                     <span className={`tag-mini ${isError ? 'fallback' : 'status'}`}>
-                      {status}
+                      {statusText(status, isError)}
                     </span>
                   </div>
                 </div>

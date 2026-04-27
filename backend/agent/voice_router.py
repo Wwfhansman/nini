@@ -77,6 +77,20 @@ COOKING_REPEAT_COMMANDS = {
     "当前步骤怎么做": "repeat_current_step",
 }
 
+VISION_COMMANDS = {
+    "看看食材",
+    "看一下食材",
+    "看看台面",
+    "看一下台面",
+    "看看台面上有什么",
+    "看一下台面上有什么",
+    "识别一下食材",
+    "我现在有什么菜",
+    "看看我现在有什么",
+    "冰箱里这些能做什么",
+    "看一下我现在有什么",
+}
+
 
 def normalize_voice_text(text: str) -> str:
     normalized = text.strip().strip(TRAILING_PUNCTUATION)
@@ -110,6 +124,17 @@ def _control_route(command: str, normalized_text: str, reason: str, confidence: 
     )
 
 
+def _frontend_action_route(intent: str, normalized_text: str, reason: str) -> VoiceRouteResult:
+    return VoiceRouteResult(
+        route="frontend_action",
+        intent=intent,
+        command=intent,
+        confidence=0.97,
+        reason=reason,
+        normalized_text=normalized_text,
+    )
+
+
 def route_voice_text(text: str, state: Optional[Dict[str, Any]] = None) -> VoiceRouteResult:
     """Route only high-confidence voice commands to the local P0 state machine."""
 
@@ -118,6 +143,8 @@ def route_voice_text(text: str, state: Optional[Dict[str, Any]] = None) -> Voice
         return _agent_route(normalized, "empty_text")
 
     ui_mode = (state or {}).get("ui_mode", "planning")
+    if normalized in VISION_COMMANDS:
+        return _frontend_action_route("start_vision", normalized, "vision_capture_request")
     if ui_mode == "cooking" and normalized in COOKING_NEXT_COMMANDS:
         return _control_route(COOKING_NEXT_COMMANDS[normalized], normalized, "cooking_step_progress")
     if ui_mode == "cooking" and normalized in COOKING_REPEAT_COMMANDS:

@@ -133,13 +133,13 @@ export default function LeftPanel({
     <div className="leftpanel">
       <div className="section-head">
         <span className="section-label">对话记录</span>
-        <span className="rp-aux">{messages.length} msgs</span>
+        <span className="rp-aux">{messages.length} 轮</span>
       </div>
 
       <div className="chat-list" ref={listRef}>
         {visible.length === 0 ? (
           <div className="chat-empty">
-            说说今晚想吃什么，或者点击右上「一键运行 Demo」。
+            说说今晚想吃什么，或者点击上方「一键演示」。
           </div>
         ) : (
           visible.map((msg) => (
@@ -271,7 +271,7 @@ export default function LeftPanel({
           type="button"
           className="quick-btn"
           onClick={() => onQuickAction('planning')}
-          title="reset 状态"
+          title="重新规划晚餐"
         >
           规划晚餐
         </button>

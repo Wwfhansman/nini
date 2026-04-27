@@ -37,7 +37,7 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
     <div className="view-wrap">
       <div className="view-header">
         <div className="view-eyebrow">
-          AI 推荐方案 · 基于家庭记忆与当前库存生成
+          妮妮推荐方案 · 基于家庭记忆与当前库存生成
         </div>
       </div>
 
@@ -80,7 +80,7 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
               className="btn-secondary"
               disabled={loading}
               onClick={() => onControl('reset')}
-              title="重置 demo 状态"
+              title="重新规划一道菜"
             >
               换一道
             </button>

@@ -52,9 +52,9 @@ export default function TopBar({
   const voiceColor = VOICE_COLORS[voice.tone];
 
   const modeColor =
-    mode === 'Real'
+    mode === '在线模式'
       ? 'var(--c-herb)'
-      : mode === 'Hybrid'
+      : mode === '混合模式'
       ? 'var(--c-saffron)'
       : 'var(--c-mid)';
 
@@ -87,7 +87,7 @@ export default function TopBar({
           />
         </div>
         <div className="topbar-chip">
-          <span className="topbar-chip-label">模式</span>
+          <span className="topbar-chip-label">智能服务</span>
           <span className="topbar-chip-val" style={{ color: modeColor }}>
             {mode}
           </span>
