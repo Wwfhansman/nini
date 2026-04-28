@@ -64,16 +64,33 @@ def deduct_by_recipe(
     recipe: Dict[str, Any],
     db_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    existing = {item["name"]: item for item in list_inventory(terminal_id, db_path=db_path)}
+    recipe_ingredients = {str(item) for item in recipe.get("ingredients", [])}
+    main_ingredients = [name for name in ["鸡胸肉", "番茄", "鸡蛋"] if name in recipe_ingredients]
     deductions = []
-    for ingredient in recipe.get("ingredients", []):
+    for name in main_ingredients:
+        before = existing.get(name, {}).get("amount")
+        used_amount = before or "部分"
+        after = f"已使用{used_amount}" if not str(used_amount).startswith("已使用") else str(used_amount)
+        item = database.upsert_inventory_item(
+            terminal_id=terminal_id,
+            name=name,
+            amount=after,
+            unit=existing.get(name, {}).get("unit"),
+            category=existing.get(name, {}).get("category") or "食材",
+            freshness=existing.get(name, {}).get("freshness"),
+            source="review_deduct",
+            db_path=db_path,
+        )
         deductions.append(
-            database.upsert_inventory_item(
-                terminal_id=terminal_id,
-                name=str(ingredient),
-                amount="已用于本次烹饪",
-                source="review_deduct",
-                db_path=db_path,
-            )
+            {
+                "name": name,
+                "before": before,
+                "after": after,
+                "unit": existing.get(name, {}).get("unit"),
+                "freshness": existing.get(name, {}).get("freshness"),
+                "status": "used",
+                "item_id": item["id"],
+            }
         )
     return deductions
-

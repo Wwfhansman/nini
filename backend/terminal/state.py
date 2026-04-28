@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional
 
 from backend import database
 from backend.agent.schemas import CookingStep, RecipePlan, TerminalStateSnapshot
+from backend.skills import inventory as inventory_skill
+from backend.skills import memory as memory_skill
+from backend.skills import recipe as recipe_skill
 
 
 def _model_to_dict(model: Any) -> Dict[str, Any]:
@@ -82,21 +85,19 @@ def default_state(terminal_id: str) -> Dict[str, Any]:
     snapshot = TerminalStateSnapshot(
         terminal_id=terminal_id,
         ui_mode="planning",
-        dish_name="低脂不辣番茄鸡胸肉滑蛋",
-        recipe=_default_recipe(),
+        dish_name=None,
+        recipe=None,
         current_step_index=0,
         timer_status="idle",
         timer_remaining_seconds=0,
         active_adjustments=[],
-        last_speech="今晚可以先从这道低脂不辣番茄鸡胸肉滑蛋开始。",
+        last_speech="告诉我今晚想吃什么，或者让我看看食材。",
     )
     return _model_to_dict(snapshot)
 
 
 def _recipe_steps(state: Dict[str, Any]) -> List[Dict[str, Any]]:
-    recipe = state.get("recipe") or _default_recipe()
-    state["recipe"] = recipe
-    state["dish_name"] = state.get("dish_name") or recipe["dish_name"]
+    recipe = state.get("recipe") or {}
     return recipe.get("steps", [])
 
 
@@ -113,9 +114,6 @@ def get_state(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]
     state = database.get_state(terminal_id, db_path=db_path)
     if state is None:
         state = database.save_state(terminal_id, default_state(terminal_id), db_path=db_path)
-    if not state.get("recipe"):
-        state["recipe"] = _default_recipe()
-        state = database.save_state(terminal_id, state, db_path=db_path)
     return state
 
 
@@ -126,17 +124,30 @@ def reset_state(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, An
 
 def start_cooking(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]:
     state = get_state(terminal_id, db_path=db_path)
+    steps = _recipe_steps(state)
+    if not steps:
+        state["ui_mode"] = "planning"
+        state["timer_status"] = "idle"
+        state["timer_remaining_seconds"] = 0
+        state["last_speech"] = "请先规划一道菜，再开始烹饪。"
+        return database.save_state(terminal_id, state, db_path=db_path)
     state["ui_mode"] = "cooking"
-    state["current_step_index"] = min(max(int(state.get("current_step_index", 0)), 0), len(_recipe_steps(state)) - 1)
+    state["current_step_index"] = min(max(int(state.get("current_step_index", 0)), 0), len(steps) - 1)
     state["timer_status"] = "running"
     state["timer_remaining_seconds"] = _current_step_duration(state)
-    state["last_speech"] = "开始做这道低脂不辣番茄鸡胸肉滑蛋。"
+    state["last_speech"] = f"开始做这道{state.get('dish_name') or '菜'}。"
     return database.save_state(terminal_id, state, db_path=db_path)
 
 
 def next_step(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]:
     state = get_state(terminal_id, db_path=db_path)
     steps = _recipe_steps(state)
+    if not steps:
+        state["ui_mode"] = "planning"
+        state["timer_status"] = "idle"
+        state["timer_remaining_seconds"] = 0
+        state["last_speech"] = "当前还没有烹饪步骤，请先规划一道菜。"
+        return database.save_state(terminal_id, state, db_path=db_path)
     current = int(state.get("current_step_index", 0))
     state["current_step_index"] = min(current + 1, max(len(steps) - 1, 0))
     state["ui_mode"] = "cooking"
@@ -148,6 +159,12 @@ def next_step(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]
 
 def previous_step(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]:
     state = get_state(terminal_id, db_path=db_path)
+    if not _recipe_steps(state):
+        state["ui_mode"] = "planning"
+        state["timer_status"] = "idle"
+        state["timer_remaining_seconds"] = 0
+        state["last_speech"] = "当前还没有烹饪步骤，请先规划一道菜。"
+        return database.save_state(terminal_id, state, db_path=db_path)
     current = int(state.get("current_step_index", 0))
     state["current_step_index"] = max(current - 1, 0)
     state["ui_mode"] = "cooking"
@@ -197,9 +214,27 @@ def current_step_speech(state: Dict[str, Any]) -> str:
 
 def finish_cooking(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]:
     state = get_state(terminal_id, db_path=db_path)
+    if not state.get("recipe") or state.get("ui_mode") != "cooking":
+        state.pop("review_generated", None)
+        if not state.get("recipe"):
+            state["ui_mode"] = "planning"
+            state["timer_status"] = "idle"
+            state["timer_remaining_seconds"] = 0
+            state["last_speech"] = "当前还没有完成的烹饪，请先规划一道菜。"
+        else:
+            state["last_speech"] = "当前还没有开始烹饪，先开始做这道菜再完成复盘。"
+        return database.save_state(terminal_id, state, db_path=db_path)
     state["ui_mode"] = "review"
     state["timer_status"] = "finished"
     state["timer_remaining_seconds"] = 0
+    if state.get("recipe"):
+        inventory_changes = inventory_skill.deduct_by_recipe(terminal_id, state["recipe"], db_path=db_path)
+        state["review"] = recipe_skill.build_review(
+            state,
+            memory_skill.list_memories(terminal_id, db_path=db_path),
+            inventory_changes,
+        )
+        state["review_generated"] = True
     state["last_speech"] = "已完成，进入复盘。"
     return database.save_state(terminal_id, state, db_path=db_path)
 
@@ -237,8 +272,45 @@ def apply_control(command: str, terminal_id: str, db_path: Optional[str] = None)
         status="success",
         db_path=db_path,
     )
+    events = [event]
+    if command == "finish" and state.get("review_generated") and state.get("review"):
+        review = state["review"]
+        inventory_changes = review.get("inventory_changes") or []
+        if inventory_changes:
+            events.append(
+                database.add_tool_event(
+                    terminal_id=terminal_id,
+                    event_type="agent_tool",
+                    name="inventory_deduct",
+                    input_json={"dish_name": state.get("dish_name")},
+                    output_json={
+                        "model_called": False,
+                        "changes": inventory_changes,
+                    },
+                    status="success",
+                    db_path=db_path,
+                )
+            )
+        events.append(
+            database.add_tool_event(
+                terminal_id=terminal_id,
+                event_type="agent_tool",
+                name="cooking_review",
+                input_json={"dish_name": state.get("dish_name")},
+                output_json={
+                    "model_called": False,
+                    "summary": review.get("summary"),
+                    "used_ingredients": review.get("used_ingredients", []),
+                },
+                status="success",
+                db_path=db_path,
+            )
+        )
+        state = dict(state)
+        state.pop("review_generated", None)
+        state = database.save_state(terminal_id, state, db_path=db_path)
     return {
         "data": output_json,
         "state": state,
-        "events": [event],
+        "events": events,
     }

@@ -5,6 +5,7 @@ from backend.app import app
 
 
 TERMINAL_ID = "demo-kitchen-001"
+PLAN_TEXT = "我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？"
 
 
 def _client(tmp_path, monkeypatch):
@@ -22,9 +23,14 @@ def _chat(client: TestClient, text: str):
     return client.post("/api/chat", json={"terminal_id": TERMINAL_ID, "text": text, "source": "voice"})
 
 
+def _plan(client: TestClient):
+    return _chat(client, PLAN_TEXT)
+
+
 def test_wake_word_next_step_routes_to_local_control_without_provider(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
+    _plan(client)
     _control(client, "start")
 
     response = _chat(client, "妮妮，下一步。")
@@ -43,6 +49,7 @@ def test_wake_word_next_step_routes_to_local_control_without_provider(tmp_path, 
 def test_cooking_hao_le_routes_to_next_step(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
+    _plan(client)
     _control(client, "start")
 
     response = _chat(client, "好了。")
@@ -57,6 +64,7 @@ def test_cooking_hao_le_routes_to_next_step(tmp_path, monkeypatch):
 def test_voice_pause_and_resume_update_timer_status(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
+    _plan(client)
     _control(client, "start")
 
     pause = _chat(client, "等一下")
@@ -75,6 +83,7 @@ def test_voice_pause_and_resume_update_timer_status(tmp_path, monkeypatch):
 def test_repeat_current_step_does_not_change_step_and_speaks_instruction(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
+    _plan(client)
     _control(client, "start")
     before = client.get(f"/api/state?terminal_id={TERMINAL_ID}").json()["state"]
 
@@ -94,6 +103,7 @@ def test_repeat_current_step_does_not_change_step_and_speaks_instruction(tmp_pat
 def test_planning_confirmation_starts_cooking(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
+    _plan(client)
 
     response = _chat(client, "就做这个")
 
@@ -107,6 +117,7 @@ def test_planning_confirmation_starts_cooking(tmp_path, monkeypatch):
 def test_planning_hao_le_starts_cooking(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
+    _plan(client)
 
     response = _chat(client, "好了。")
 
@@ -133,6 +144,7 @@ def test_repeat_prompt_in_planning_stays_on_agent_path(tmp_path, monkeypatch):
 def test_repeat_prompt_in_review_stays_on_agent_path(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
+    _plan(client)
     _control(client, "start")
     _control(client, "finish")
 

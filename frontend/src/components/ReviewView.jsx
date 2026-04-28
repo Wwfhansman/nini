@@ -20,6 +20,13 @@ export default function ReviewView({
   const minutes = recipe?.estimated_minutes;
   const stepCount = recipe?.steps?.length || 0;
   const adjustments = state?.active_adjustments || [];
+  const review = state?.review || {};
+  const inventoryChanges = review.inventory_changes || [];
+  const nextTime = review.next_time || [
+    '番茄类菜品默认降低酸度',
+    '继续保持不辣',
+    '优先少油做法',
+  ];
 
   return (
     <div className="view-wrap">
@@ -55,14 +62,14 @@ export default function ReviewView({
 
         <div className="review-cols">
           <div className="info-block">
-            <div className="info-title">库存扣减</div>
-            {inventory.length === 0 ? (
-              <div className="mem-empty">暂无库存记录</div>
+            <div className="info-title">本次食材消耗</div>
+            {inventoryChanges.length === 0 ? (
+              <div className="mem-empty">暂无消耗记录</div>
             ) : (
-              inventory.map((it) => (
-                <div className="info-row" key={it.id || it.name}>
-                  <span className="info-key">{it.name}</span>
-                  <span className="info-val warn">{it.amount || '—'}</span>
+              inventoryChanges.map((it) => (
+                <div className="info-row" key={it.item_id || it.name}>
+                  <span className="info-key">已使用 {it.name}</span>
+                  <span className="info-val warn">{it.before || '部分'}</span>
                 </div>
               ))
             )}
@@ -83,11 +90,7 @@ export default function ReviewView({
 
           <div className="info-block">
             <div className="info-title">下次建议</div>
-            {[
-              '番茄类菜品默认降低酸度',
-              '继续保持不辣',
-              '优先少油做法',
-            ].map((t) => (
+            {nextTime.map((t) => (
               <div className="review-line muted" key={t}>
                 <span className="arrow">→</span>
                 {t}

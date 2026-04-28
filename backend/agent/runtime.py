@@ -179,11 +179,83 @@ def _memory_action_response(
         status="success",
         db_path=db_path,
     )
+    database.add_conversation(
+        terminal_id,
+        "user",
+        voice_route.normalized_text,
+        metadata_json={"source": "memory_action", "intent": voice_route.intent},
+        db_path=db_path,
+    )
+    database.add_conversation(
+        terminal_id,
+        "assistant",
+        speech,
+        metadata_json={"intent": event_name, "memory_action": memory_action},
+        db_path=db_path,
+    )
     return {
         "data": output_json,
         "state": next_state,
         "events": [event],
     }
+
+
+def _recent_deleted_memory_keys(terminal_id: str, db_path: Optional[str]) -> set[tuple[str, str]]:
+    deleted: set[tuple[str, str]] = set()
+    for event in database.list_tool_events(terminal_id, limit=20, db_path=db_path):
+        if event.get("name") != "memory_delete":
+            continue
+        output = event.get("output_json") or {}
+        action = output.get("memory_action") or {}
+        subject = action.get("subject")
+        key = action.get("key")
+        if subject and key:
+            deleted.add((str(subject), str(key)))
+    return deleted
+
+
+def _filter_recently_deleted_memory_writes(
+    terminal_id: str,
+    memory_writes: List[Any],
+    request_text: str,
+    db_path: Optional[str],
+) -> List[Any]:
+    deleted_keys = _recent_deleted_memory_keys(terminal_id, db_path)
+    if not deleted_keys:
+        return memory_writes
+    filtered = []
+    for item in memory_writes:
+        key = (str(item.subject), str(item.key))
+        if key not in deleted_keys or _request_explicitly_readds_memory(request_text, item):
+            filtered.append(item)
+    return filtered
+
+
+def _has_explicit_memory_write_intent(text: str) -> bool:
+    normalized = "".join(str(text or "").split())
+    return any(token in normalized for token in ["记住", "记下来", "帮我记", "以后记得"])
+
+
+def _request_explicitly_readds_memory(text: str, item: Any) -> bool:
+    if not _has_explicit_memory_write_intent(text):
+        return False
+    normalized = "".join(str(text or "").split())
+    value = item.value
+    if isinstance(value, dict):
+        value_text = str(value.get("text") or value.get("value") or value)
+    else:
+        value_text = str(value)
+    compact_value = "".join(value_text.split())
+    if compact_value and (compact_value in normalized or normalized in compact_value):
+        return True
+    key = str(item.key)
+    semantic_tokens = {
+        "taste.sour": ["不喜欢太酸", "不要太酸", "怕酸", "不爱太酸", "少酸"],
+        "taste.soup": ["汤", "喝汤", "喜欢喝汤"],
+        "diet.spicy": ["辣", "不吃辣"],
+        "health_goal.diet": ["减脂", "低脂"],
+    }
+    return any(token in normalized for token in semantic_tokens.get(key, []))
 
 
 def _handle_memory_delete_request(
@@ -274,7 +346,13 @@ def _handle_memory_delete_confirm(
         next_state,
         "memory_delete",
         speech,
-        {"type": "deleted", "memory_id": memory_id, "summary": summary},
+        {
+            "type": "deleted",
+            "memory_id": memory_id,
+            "summary": summary,
+            "subject": deleted.get("subject"),
+            "key": deleted.get("key"),
+        },
         voice_route,
         db_path,
     )
@@ -425,20 +503,27 @@ def handle_chat(
 
     written_memories = []
     if agent_output.memory_writes:
-        written_memories = memory.write_memories(
+        memory_writes = _filter_recently_deleted_memory_writes(
             terminal_id,
             agent_output.memory_writes,
+            request.text,
+            resolved_db_path,
+        )
+        written_memories = memory.write_memories(
+            terminal_id,
+            memory_writes,
             db_path=resolved_db_path,
         )
-        events.append(
-            _record_event(
-                terminal_id,
-                "memory_write",
-                input_json={"count": len(agent_output.memory_writes)},
-                output_json={"memories": written_memories},
-                db_path=resolved_db_path,
+        if written_memories:
+            events.append(
+                _record_event(
+                    terminal_id,
+                    "memory_write",
+                    input_json={"count": len(memory_writes)},
+                    output_json={"memories": written_memories},
+                    db_path=resolved_db_path,
+                )
             )
-        )
 
     updated_inventory = []
     if agent_output.inventory_patches:
@@ -459,7 +544,14 @@ def handle_chat(
 
     next_state = dict(state)
     if agent_output.intent == "plan_recipe" or "recipe_plan" in tool_names:
-        planned_recipe = recipe.plan_recipe(context)
+        plan_context = {
+            **context,
+            "request_text": request.text,
+            "memories": memory.list_memories(terminal_id, db_path=resolved_db_path),
+            "inventory": inventory.inventory_summary(terminal_id, db_path=resolved_db_path),
+            "recipe_documents": database.list_recipe_documents(terminal_id, db_path=resolved_db_path),
+        }
+        planned_recipe = recipe.plan_recipe(plan_context)
         next_state.update(
             {
                 "ui_mode": "planning",

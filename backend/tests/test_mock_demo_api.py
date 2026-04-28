@@ -32,6 +32,8 @@ def test_chat_initial_plan_writes_memory_inventory_and_planning_state(tmp_path, 
     assert payload["data"]["intent"] == "plan_recipe"
     assert payload["state"]["ui_mode"] == "planning"
     assert payload["state"]["dish_name"] == "低脂不辣番茄鸡胸肉滑蛋"
+    assert "少油/低脂" in payload["state"]["active_adjustments"]
+    assert "不放辣" in payload["state"]["active_adjustments"]
     assert [event["name"] for event in payload["events"]] == [
         "memory_write",
         "inventory_update",
@@ -167,6 +169,50 @@ def test_recipe_knowledge_import_records_document_and_event(tmp_path, monkeypatc
     assert state_payload["recipe_documents"][0]["title"] == "妈妈版番茄炒蛋"
 
 
+def test_recipe_knowledge_influences_next_plan(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+    client.post(
+        "/api/knowledge/recipe",
+        json={
+            "terminal_id": "demo-kitchen-001",
+            "title": "妈妈版番茄炒蛋",
+            "content": "妈妈版番茄炒蛋会多放鸡蛋，不放辣，番茄少炒。",
+        },
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": PLAN_TEXT, "source": "text"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "参考家庭菜谱" in payload["state"]["active_adjustments"]
+    assert "家庭菜谱" in payload["state"]["recipe"]["reasoning_summary"]
+
+
+def test_finish_generates_review_and_inventory_deduction(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+    client.post("/api/chat", json={"terminal_id": "demo-kitchen-001", "text": PLAN_TEXT, "source": "text"})
+    client.post("/api/control", json={"terminal_id": "demo-kitchen-001", "command": "start"})
+
+    response = client.post("/api/control", json={"terminal_id": "demo-kitchen-001", "command": "finish"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"]["ui_mode"] == "review"
+    assert payload["state"]["review"]["inventory_changes"]
+    assert {"鸡胸肉", "番茄", "鸡蛋"}.issubset(
+        {item["name"] for item in payload["state"]["review"]["inventory_changes"]}
+    )
+    assert {"inventory_deduct", "cooking_review"}.issubset(
+        {event["name"] for event in payload["events"]}
+    )
+    assert all("已使用" in item["after"] for item in payload["state"]["review"]["inventory_changes"])
+
+
 def test_chat_tomato_followup_uses_mock_memory_answer(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _reset(client)
@@ -185,6 +231,35 @@ def test_chat_tomato_followup_uses_mock_memory_answer(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["data"]["intent"] == "answer_tomato_memory"
     assert "默认降低酸度" in payload["data"]["speech"]
+
+
+def test_deleted_sour_memory_no_longer_affects_next_plan(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+    client.post("/api/chat", json={"terminal_id": "demo-kitchen-001", "text": PLAN_TEXT, "source": "text"})
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我不喜欢太酸", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "不要记我不喜欢太酸了", "source": "text"},
+    )
+    client.post("/api/chat", json={"terminal_id": "demo-kitchen-001", "text": "确认", "source": "text"})
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": PLAN_TEXT, "source": "text"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "不喜欢太酸" not in [
+        memory["value_json"]["text"]
+        for memory in client.get("/api/state?terminal_id=demo-kitchen-001").json()["data"]["memories"]
+    ]
+    assert "降低酸度" not in payload["state"]["active_adjustments"]
+    assert "增加鸡蛋比例" not in payload["state"]["active_adjustments"]
 
 
 def test_mock_demo_main_flow(tmp_path, monkeypatch):

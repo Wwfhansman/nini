@@ -43,6 +43,12 @@ function toAudioFile(blob) {
   });
 }
 
+function createDemoIngredientsFile() {
+  return new File([new Blob(['nini demo ingredients'], { type: 'image/jpeg' })], 'demo-ingredients.jpg', {
+    type: 'image/jpeg',
+  });
+}
+
 function playAudioBase64({ audio_base64: audioBase64, mime_type: mimeType, fallback_used: fallbackUsed }) {
   if (!audioBase64 || fallbackUsed || !mimeType) {
     return Promise.resolve(false);
@@ -476,12 +482,7 @@ export default function App() {
     try {
       await step('重置终端', () => sendControl('reset', { throwOnError: true }));
       await step('规划晚餐', () => sendChat(DEMO_PLAN_TEXT, { throwOnError: true }), 800);
-      if (pendingImage) {
-        await step('查看食材', () => sendVision(pendingImage, { throwOnError: true }), 800);
-      } else {
-        setDemoStep('跳过查看食材');
-        await sleep(400);
-      }
+      await step('查看食材', () => sendVision(pendingImage || createDemoIngredientsFile(), { throwOnError: true }), 800);
       await step('开始烹饪', () => sendControl('start', { throwOnError: true }));
       await step('记住口味', () => sendChat(DEMO_SOUR_TEXT, { throwOnError: true }), 800);
       await step('进入下一步', () => sendControl('next_step', { throwOnError: true }));

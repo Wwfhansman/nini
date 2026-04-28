@@ -70,19 +70,99 @@ def base_recipe_plan() -> Dict[str, Any]:
         ),
     ]
     recipe = RecipePlan(
-        dish_name="低脂不辣番茄鸡胸肉滑蛋",
+        dish_name="番茄鸡胸肉滑蛋",
         servings="1-2人份",
         estimated_minutes=18,
-        reasoning_summary="符合减脂目标，少油、不额外加糖；照顾妈妈不吃辣；使用现有鸡胸肉、番茄和鸡蛋。",
+        reasoning_summary="使用鸡胸肉、番茄和鸡蛋完成一顿饭主菜。",
         ingredients=["鸡胸肉", "番茄", "鸡蛋", "盐", "淀粉", "少量油"],
         steps=steps,
-        adjustments=["少油", "不额外加糖", "不放辣"],
+        adjustments=[],
     )
     return _model_to_dict(recipe)
 
 
+def _value_text(item: Dict[str, Any]) -> str:
+    value = item.get("value_json")
+    if isinstance(value, dict):
+        return str(value.get("text") or value.get("value") or value)
+    return str(value or "")
+
+
+def _context_text(context: Optional[Dict[str, Any]]) -> str:
+    context = context or {}
+    parts: List[str] = []
+    parts.append(str(context.get("request_text") or ""))
+    for item in context.get("memories") or []:
+        parts.extend([str(item.get("subject") or ""), str(item.get("key") or ""), _value_text(item)])
+    for item in context.get("inventory") or []:
+        parts.extend([str(item.get("name") or ""), str(item.get("amount") or "")])
+    for item in context.get("recipe_documents") or []:
+        parts.extend([str(item.get("title") or ""), str(item.get("content") or "")])
+    return " ".join(parts)
+
+
+def _inventory_map(context: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return {
+        str(item.get("name")): item
+        for item in (context or {}).get("inventory", [])
+        if item.get("name")
+    }
+
+
+def _recipe_documents_match(context: Optional[Dict[str, Any]]) -> bool:
+    for item in (context or {}).get("recipe_documents") or []:
+        text = f"{item.get('title') or ''} {item.get('content') or ''}"
+        if "妈妈版番茄炒蛋" in text or ("家庭" in text and "番茄" in text):
+            return True
+    return False
+
+
 def plan_recipe(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    return base_recipe_plan()
+    recipe = base_recipe_plan()
+    text = _context_text(context)
+    inventory = _inventory_map(context)
+    reasons = []
+    name_prefixes: List[str] = []
+
+    if any(token in text for token in ["减脂", "低脂"]):
+        name_prefixes.append("低脂")
+        _append_unique(recipe["adjustments"], "少油/低脂")
+        reasons.append("命中用户减脂或低脂目标，采用少油做法")
+    if any(token in text for token in ["妈妈不吃辣", "不吃辣", "不放辣", "diet.spicy", "taste.spicy"]):
+        name_prefixes.append("不辣")
+        _append_unique(recipe["adjustments"], "不放辣")
+        reasons.append("照顾妈妈不吃辣，菜谱不使用辣椒")
+    if any(token in text for token in ["不喜欢太酸", "太酸", "taste.sour"]):
+        _append_unique(recipe["adjustments"], "降低酸度")
+        _append_unique(recipe["adjustments"], "增加鸡蛋比例")
+        reasons.append("命中用户不喜欢太酸，减少番茄酸度")
+        for step in recipe.get("steps", []):
+            if step["title"] == "加入番茄和鸡蛋":
+                step["duration_seconds"] = min(int(step.get("duration_seconds", 150)), 90)
+                step["instruction"] = "番茄减少翻炒时间，再倒入鸡蛋，用鸡蛋比例中和酸味，不额外加醋。"
+
+    if _recipe_documents_match(context):
+        _append_unique(recipe["adjustments"], "参考家庭菜谱")
+        reasons.append("参考已导入的家庭菜谱做法")
+
+    if inventory:
+        required = ["鸡胸肉", "番茄", "鸡蛋"]
+        missing = [name for name in required if name not in inventory]
+        if missing:
+            recipe["ingredients"].extend([f"待确认：{name}" for name in missing])
+            reasons.append(f"{'、'.join(missing)}库存未确认，建议烹饪前补充或替换")
+        tomato_amount = str(inventory.get("番茄", {}).get("amount") or "")
+        chicken_amount = str(inventory.get("鸡胸肉", {}).get("amount") or "")
+        if "半个" in tomato_amount or "少量" in chicken_amount:
+            recipe["servings"] = "1人份"
+            _append_unique(recipe["adjustments"], "按现有食材减量")
+            _append_unique(recipe["adjustments"], "降低酸度")
+            reasons.append("根据现有食材数量改为一人份")
+
+    recipe["dish_name"] = "".join(name_prefixes) + recipe["dish_name"]
+    if reasons:
+        recipe["reasoning_summary"] = "；".join(reasons) + "。"
+    return recipe
 
 
 def ensure_recipe(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -148,13 +228,15 @@ def adjust_recipe_for_memory(state: Dict[str, Any], memory: Dict[str, Any]) -> D
 def build_review(
     state: Dict[str, Any],
     memories: List[Dict[str, Any]],
-    inventory: List[Dict[str, Any]],
+    inventory_changes: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    dish_name = state.get("dish_name") or "本次菜品"
+    next_time = ["番茄类菜品默认降低酸度", "继续保持不辣", "优先少油做法"]
     return {
-        "dish_name": state.get("dish_name"),
-        "summary": "本次完成低脂不辣番茄鸡胸肉滑蛋。",
-        "inventory_used": [item.get("name") for item in inventory],
+        "dish_name": dish_name,
+        "summary": f"本次完成{dish_name}。",
+        "used_ingredients": [item.get("name") for item in inventory_changes],
+        "inventory_changes": inventory_changes,
         "memory_count": len(memories),
-        "next_time": ["番茄类菜品默认降低酸度", "继续保持不辣", "优先少油做法"],
+        "next_time": next_time,
     }
-

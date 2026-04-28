@@ -183,6 +183,247 @@ def test_qiniu_chat_normalizes_common_memory_aliases(tmp_path, monkeypatch):
     assert "妈妈不吃辣" in export.text
 
 
+def test_plan_recipe_uses_current_text_when_provider_skips_memory_writes(tmp_path, monkeypatch):
+    client = _client(
+        tmp_path,
+        monkeypatch,
+        mode="hybrid",
+        qiniu_key="test-key",
+        model_agent="agent-model",
+    )
+
+    def fake_post_chat(self, payload):
+        content = {
+            "intent": "plan_recipe",
+            "ui_mode": "planning",
+            "speech": "我建议做番茄鸡胸肉滑蛋。",
+            "ui_patch": {},
+            "tool_calls": [{"name": "recipe_plan"}],
+            "memory_writes": [],
+            "inventory_patches": [],
+            "recipe_adjustments": [],
+        }
+        return {"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]}
+
+    monkeypatch.setattr(QiniuChatProvider, "_post_chat", fake_post_chat)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": PLAN_TEXT, "source": "text"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"]["dish_name"] == "低脂不辣番茄鸡胸肉滑蛋"
+    assert "少油/低脂" in payload["state"]["active_adjustments"]
+    assert "不放辣" in payload["state"]["active_adjustments"]
+    assert "减脂" in payload["state"]["recipe"]["reasoning_summary"]
+
+
+def test_deleted_memory_is_not_rewritten_from_stale_recent_messages(tmp_path, monkeypatch):
+    client = _client(
+        tmp_path,
+        monkeypatch,
+        mode="hybrid",
+        qiniu_key="test-key",
+        model_agent="agent-model",
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我不喜欢太酸", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "不要记我不喜欢太酸了", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "确认", "source": "text"},
+    )
+
+    def fake_post_chat(self, payload):
+        content = {
+            "intent": "small_reply",
+            "ui_mode": "planning",
+            "speech": "我按当前记忆继续。",
+            "ui_patch": {},
+            "tool_calls": [{"name": "memory_write"}],
+            "memory_writes": [
+                {
+                    "type": "preference",
+                    "subject": "user",
+                    "key": "taste.sour",
+                    "value": "不喜欢太酸",
+                    "confidence": 1.0,
+                    "source": "user_explicit",
+                }
+            ],
+            "inventory_patches": [],
+            "recipe_adjustments": [],
+        }
+        return {"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]}
+
+    monkeypatch.setattr(QiniuChatProvider, "_post_chat", fake_post_chat)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "今晚还有什么建议？", "source": "text"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "memory_write" not in [event["name"] for event in payload["events"]]
+    state_payload = client.get("/api/state?terminal_id=demo-kitchen-001").json()["data"]
+    assert "不喜欢太酸" not in [memory["value_json"]["text"] for memory in state_payload["memories"]]
+
+
+def test_explicit_readd_memory_after_delete_is_allowed(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, mode="mock")
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我不喜欢太酸", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "不要记我不喜欢太酸了", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "确认", "source": "text"},
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我不喜欢太酸", "source": "text"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "memory_write" in [event["name"] for event in payload["events"]]
+    state_payload = client.get("/api/state?terminal_id=demo-kitchen-001").json()["data"]
+    assert "不喜欢太酸" in [memory["value_json"]["text"] for memory in state_payload["memories"]]
+
+
+def test_explicit_memory_write_filters_stale_deleted_items_per_item(tmp_path, monkeypatch):
+    client = _client(
+        tmp_path,
+        monkeypatch,
+        mode="hybrid",
+        qiniu_key="test-key",
+        model_agent="agent-model",
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我不喜欢太酸", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "不要记我不喜欢太酸了", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "确认", "source": "text"},
+    )
+
+    def fake_post_chat(self, payload):
+        content = {
+            "intent": "remember_soup_preference",
+            "ui_mode": "planning",
+            "speech": "记住了。",
+            "ui_patch": {},
+            "tool_calls": [{"name": "memory_write"}],
+            "memory_writes": [
+                {
+                    "type": "preference",
+                    "subject": "user",
+                    "key": "taste.soup",
+                    "value": "喜欢喝汤",
+                    "confidence": 1.0,
+                    "source": "user_explicit",
+                },
+                {
+                    "type": "preference",
+                    "subject": "user",
+                    "key": "taste.sour",
+                    "value": "不喜欢太酸",
+                    "confidence": 1.0,
+                    "source": "user_explicit",
+                },
+            ],
+            "inventory_patches": [],
+            "recipe_adjustments": [],
+        }
+        return {"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]}
+
+    monkeypatch.setattr(QiniuChatProvider, "_post_chat", fake_post_chat)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我喜欢喝汤", "source": "text"},
+    )
+
+    assert response.status_code == 200
+    state_payload = client.get("/api/state?terminal_id=demo-kitchen-001").json()["data"]
+    memories = {(memory["subject"], memory["key"]): memory for memory in state_payload["memories"]}
+    assert memories[("user", "taste.soup")]["value_json"]["text"] == "喜欢喝汤"
+    assert ("user", "taste.sour") not in memories
+
+
+def test_opposite_sour_preference_does_not_restore_deleted_sour_memory(tmp_path, monkeypatch):
+    client = _client(
+        tmp_path,
+        monkeypatch,
+        mode="hybrid",
+        qiniu_key="test-key",
+        model_agent="agent-model",
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我不喜欢太酸", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "不要记我不喜欢太酸了", "source": "text"},
+    )
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "确认", "source": "text"},
+    )
+
+    def fake_post_chat(self, payload):
+        content = {
+            "intent": "remember_sour_positive_preference",
+            "ui_mode": "planning",
+            "speech": "记住了。",
+            "ui_patch": {},
+            "tool_calls": [{"name": "memory_write"}],
+            "memory_writes": [
+                {
+                    "type": "preference",
+                    "subject": "user",
+                    "key": "taste.sour",
+                    "value": "不喜欢太酸",
+                    "confidence": 1.0,
+                    "source": "user_explicit",
+                }
+            ],
+            "inventory_patches": [],
+            "recipe_adjustments": [],
+        }
+        return {"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]}
+
+    monkeypatch.setattr(QiniuChatProvider, "_post_chat", fake_post_chat)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "记住我喜欢酸一点", "source": "text"},
+    )
+
+    assert response.status_code == 200
+    state_payload = client.get("/api/state?terminal_id=demo-kitchen-001").json()["data"]
+    assert "不喜欢太酸" not in [memory["value_json"]["text"] for memory in state_payload["memories"]]
+
+
 def test_normalize_agent_output_payload_fills_missing_memory_fields():
     payload = {
         "intent": "remember",
@@ -226,7 +467,8 @@ def test_p0_chat_control_does_not_resolve_provider(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["state"]["ui_mode"] == "cooking"
+    assert payload["state"]["ui_mode"] == "planning"
+    assert "请先规划" in payload["data"]["speech"]
     assert payload["data"]["model_called"] is False
     assert payload["events"][0]["event_type"] == "local_control"
     assert payload["events"][0]["name"] == "start"
