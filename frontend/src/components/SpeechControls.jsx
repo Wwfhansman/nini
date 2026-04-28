@@ -5,6 +5,7 @@ export default function SpeechControls({
   recordingState,
   recorderError,
   durationMs,
+  speechRecognitionHint,
   onVoicePrimary,
   onPickAudio,
   onPlayTts,
@@ -44,7 +45,9 @@ export default function SpeechControls({
     ['unsupported', 'denied'].includes(recordingState) ||
     ['unsupported', 'denied'].includes(voiceStatus) ||
     (loading && voiceStatus !== 'recording') ||
-    ['requesting', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(voiceStatus);
+    ['requesting', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
+      voiceStatus,
+    );
   const secondaryDisabled =
     loading ||
     ['requesting', 'recording', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
@@ -57,7 +60,9 @@ export default function SpeechControls({
       <div className="speech-copy">
         <span className="speech-status">{statusText}</span>
         <span className="speech-help">
-          {recorderError || '点击开始说话，妮妮会听完、理解并回复。'}
+          {recorderError ||
+            speechRecognitionHint ||
+            '点击开始说话，妮妮会听完、理解并回复。'}
         </span>
       </div>
       <button

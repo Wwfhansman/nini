@@ -105,6 +105,7 @@ export default function LeftPanel({
   recordingState,
   recorderError,
   recordingDurationMs,
+  speechRecognitionHint,
   onQuickAction,
 }) {
   const [input, setInput] = useState('');
@@ -168,6 +169,7 @@ export default function LeftPanel({
         recordingState={recordingState}
         recorderError={recorderError}
         durationMs={recordingDurationMs}
+        speechRecognitionHint={speechRecognitionHint}
         onVoicePrimary={onVoicePrimary}
         onPickAudio={onPickAudio}
         onPlayTts={onPlayTts}

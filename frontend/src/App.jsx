@@ -44,28 +44,46 @@ function toAudioFile(blob) {
 }
 
 function createDemoIngredientsFile() {
-  return new File([new Blob(['nini demo ingredients'], { type: 'image/jpeg' })], 'demo-ingredients.jpg', {
-    type: 'image/jpeg',
-  });
+  return new File(
+    [new Blob(['nini demo ingredients'], { type: 'image/jpeg' })],
+    'demo-ingredients.jpg',
+    { type: 'image/jpeg' },
+  );
 }
 
-function playAudioBase64({ audio_base64: audioBase64, mime_type: mimeType, fallback_used: fallbackUsed }) {
+function playAudioBase64({
+  audio_base64: audioBase64,
+  mime_type: mimeType,
+  fallback_used: fallbackUsed,
+}) {
   if (!audioBase64 || fallbackUsed || !mimeType) {
-    return Promise.resolve(false);
+    return Promise.resolve({ played: false, reason: 'no_audio' });
   }
   const src = `data:${mimeType};base64,${audioBase64}`;
   const audio = new Audio(src);
   return new Promise((resolve) => {
     let settled = false;
-    const done = (played) => {
+    const done = (result) => {
       if (settled) return;
       settled = true;
-      resolve(played);
+      resolve(result);
     };
-    audio.onended = () => done(true);
-    audio.onerror = () => done(false);
-    audio.play().catch(() => done(false));
+    audio.onended = () => done({ played: true, reason: 'played' });
+    audio.onerror = () => done({ played: false, reason: 'playback_error' });
+    audio.play().catch(() => done({ played: false, reason: 'blocked' }));
   });
+}
+
+function playbackNotice(result, manual = false) {
+  if (result?.reason === 'blocked') {
+    return manual
+      ? '浏览器未能播放音频，请稍后再试。'
+      : '浏览器未自动播放，可点击重播。';
+  }
+  if (result?.reason === 'playback_error') {
+    return '语音音频暂时无法播放，已保留文字回复。';
+  }
+  return '当前暂无可播放语音，已保留文字回复。';
 }
 
 function serviceModeLabel(mode) {
@@ -87,6 +105,7 @@ export default function App() {
   const [voiceStatus, setVoiceStatus] = useState('idle');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   const [highlightTrigger, setHighlightTrigger] = useState(0);
   const [recentEvents, setRecentEvents] = useState([]);
@@ -229,7 +248,7 @@ export default function App() {
 
   const requestSpeechPlayback = useCallback(
     async (text, source = 'tts') => {
-      if (!text) return false;
+      if (!text) return { played: false, reason: 'no_speech' };
       const resp = await postSpeechTts(terminalId, text);
       appendEvents(resp, source);
       return playAudioBase64(resp?.data || {});
@@ -237,16 +256,42 @@ export default function App() {
     [appendEvents, terminalId],
   );
 
+  const speakResponseSpeech = useCallback(
+    async (resp, source = 'auto-tts') => {
+      const speech = resp?.data?.speech;
+      if (!speech) return false;
+      setVoiceStatus('speaking');
+      try {
+        const playback = await requestSpeechPlayback(speech, source);
+        if (!playback.played) setNotice(playbackNotice(playback));
+        return playback.played;
+      } catch {
+        setNotice('语音播报暂不可用，已保留文字回复。');
+        return false;
+      } finally {
+        setVoiceStatus('idle');
+      }
+    },
+    [requestSpeechPlayback],
+  );
+
   const runRecordedVoiceTurn = useCallback(
     async (audio, source = 'recording') => {
       if (!audio) return;
       setError(null);
+      setNotice(null);
       setLoading(true);
       try {
         setVoiceStatus('recognizing');
         const audioFile = toAudioFile(audio);
         const asrResp = await postSpeechAsr(terminalId, audioFile);
         appendEvents(asrResp, `${source}-asr`);
+        if (
+          asrResp?.data?.provider === 'mock_asr' ||
+          asrResp?.data?.fallback_used
+        ) {
+          setNotice('当前为演示识别，系统会使用固定指令：下一步。');
+        }
         const text = (asrResp?.data?.text || '').trim();
         if (!text) {
           setError('没有识别到有效语音，请再说一次或上传录音。');
@@ -259,13 +304,7 @@ export default function App() {
         const chatResp = await postChat(terminalId, text, 'voice');
         applyResponse(chatResp, { source: `${source}-chat` });
         await syncFullState();
-
-        const speech = chatResp?.data?.speech;
-        if (speech) {
-          setVoiceStatus('speaking');
-          await requestSpeechPlayback(speech, `${source}-tts`);
-        }
-        setVoiceStatus('idle');
+        await speakResponseSpeech(chatResp, `${source}-tts`);
       } catch (e) {
         setError(`语音会话失败: ${e.message}`);
         setVoiceStatus('idle');
@@ -277,7 +316,7 @@ export default function App() {
       appendEvents,
       appendUserMessage,
       applyResponse,
-      requestSpeechPlayback,
+      speakResponseSpeech,
       syncFullState,
       terminalId,
     ],
@@ -288,13 +327,20 @@ export default function App() {
       const trimmed = (text || '').trim();
       if (!trimmed) return;
       setError(null);
+      setNotice(null);
       setLoading(true);
       setVoiceStatus('thinking');
       try {
-        const resp = await postChat(terminalId, trimmed, 'text');
+        const source = options.source || 'text';
+        const autoSpeak = options.autoSpeak !== false;
+        const resp = await postChat(terminalId, trimmed, source);
         applyResponse(resp, { fromUserText: trimmed, source: 'chat' });
         await syncFullState();
-        setVoiceStatus('idle');
+        if (autoSpeak) {
+          await speakResponseSpeech(resp, 'chat-tts');
+        } else {
+          setVoiceStatus('idle');
+        }
       } catch (e) {
         setError(`发送失败: ${e.message}`);
         setVoiceStatus('idle');
@@ -303,7 +349,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [terminalId, applyResponse, syncFullState],
+    [terminalId, applyResponse, speakResponseSpeech, syncFullState],
   );
 
   const sendControl = useCallback(
@@ -400,7 +446,11 @@ export default function App() {
       await runRecordedVoiceTurn(blob, 'recording');
       return;
     }
-    if (['requesting', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(voiceStatus)) {
+    if (
+      ['requesting', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
+        voiceStatus,
+      )
+    ) {
       return;
     }
 
@@ -442,8 +492,8 @@ export default function App() {
     setError(null);
     setVoiceStatus('speaking');
     try {
-      const played = await requestSpeechPlayback(last.text, 'tts');
-      if (!played) setError('暂无可播放音频，已保留文字回复。');
+      const playback = await requestSpeechPlayback(last.text, 'tts');
+      if (!playback.played) setNotice(playbackNotice(playback, true));
     } catch (e) {
       setError(`语音播报失败: ${e.message}`);
     } finally {
@@ -481,10 +531,25 @@ export default function App() {
     };
     try {
       await step('重置终端', () => sendControl('reset', { throwOnError: true }));
-      await step('规划晚餐', () => sendChat(DEMO_PLAN_TEXT, { throwOnError: true }), 800);
-      await step('查看食材', () => sendVision(pendingImage || createDemoIngredientsFile(), { throwOnError: true }), 800);
+      await step(
+        '规划晚餐',
+        () => sendChat(DEMO_PLAN_TEXT, { throwOnError: true, autoSpeak: false }),
+        800,
+      );
+      await step(
+        '查看食材',
+        () =>
+          sendVision(pendingImage || createDemoIngredientsFile(), {
+            throwOnError: true,
+          }),
+        800,
+      );
       await step('开始烹饪', () => sendControl('start', { throwOnError: true }));
-      await step('记住口味', () => sendChat(DEMO_SOUR_TEXT, { throwOnError: true }), 800);
+      await step(
+        '记住口味',
+        () => sendChat(DEMO_SOUR_TEXT, { throwOnError: true, autoSpeak: false }),
+        800,
+      );
       await step('进入下一步', () => sendControl('next_step', { throwOnError: true }));
       await step('暂停', () => sendControl('pause', { throwOnError: true }));
       await step('继续', () => sendControl('resume', { throwOnError: true }));
@@ -500,6 +565,16 @@ export default function App() {
 
   const mode = useMemo(() => {
     return serviceModeLabel(health?.demo_mode);
+  }, [health]);
+
+  const speechRecognitionHint = useMemo(() => {
+    const providers = health?.providers || {};
+    const modeValue = providers.speech_provider_mode;
+    if (modeValue === 'mock') return '语音识别：演示模式，会返回固定指令';
+    if (['real', 'auto'].includes(modeValue)) {
+      return '语音识别：当前暂用演示兜底';
+    }
+    return '';
   }, [health]);
 
   const memories = apiData?.memories || [];
@@ -542,6 +617,14 @@ export default function App() {
         <div className="app-banner">
           <span>{error}</span>
           <button type="button" onClick={() => setError(null)}>
+            关闭
+          </button>
+        </div>
+      ) : null}
+      {!error && notice ? (
+        <div className="app-banner notice">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)}>
             关闭
           </button>
         </div>
@@ -593,6 +676,7 @@ export default function App() {
             recordingState={recordingState}
             recorderError={recorderError}
             recordingDurationMs={durationMs}
+            speechRecognitionHint={speechRecognitionHint}
             onQuickAction={(action) => {
               if (action === 'planning') sendControl('reset');
               else if (action === 'cooking') sendControl('start');

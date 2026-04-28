@@ -28,6 +28,15 @@ function logStatusText(status) {
   return status || '—';
 }
 
+function speechRecognitionStatus(providers) {
+  const mode = providers.speech_provider_mode;
+  if (mode === 'mock') return { text: '演示模式', tone: 'warn' };
+  if (['real', 'auto'].includes(mode)) {
+    return { text: '演示兜底', tone: 'warn' };
+  }
+  return { text: '演示模式', tone: 'warn' };
+}
+
 export default function InventoryPanel({ inventory, providerLogs, health }) {
   const items = inventory || [];
   const logs = (providerLogs || []).slice(-3);
@@ -90,13 +99,19 @@ export default function InventoryPanel({ inventory, providerLogs, health }) {
           </span>
         </div>
         <div className="provider-row">
-          <span className="key">语音服务</span>
+          <span className="key">语音播报</span>
           <span
             className={`val ${
-              providers.speech_provider_mode === 'mock' ? 'warn' : 'ok'
+              providers.volc_tts_configured ? 'ok' : 'warn'
             }`}
           >
-            {modeLabel(providers.speech_provider_mode)}
+            {serviceStatus(providers.volc_tts_configured)}
+          </span>
+        </div>
+        <div className="provider-row">
+          <span className="key">语音识别</span>
+          <span className={`val ${speechRecognitionStatus(providers).tone}`}>
+            {speechRecognitionStatus(providers).text}
           </span>
         </div>
         {logs.map((log) => (

@@ -56,15 +56,57 @@ function statusText(status, isError) {
   return isError ? '需要处理' : status;
 }
 
+function eventDescription(event) {
+  const out = event.output || event.output_json || {};
+  if (event.name === 'recipe_plan') return out.dish_name;
+  if (event.name === 'recipe_adjust' && out.adjustments?.length) {
+    return out.adjustments.slice(0, 2).join('；');
+  }
+  if (event.name === 'vision_observe') {
+    return out.observation?.ingredients
+      ?.slice(0, 3)
+      .map((it) => `${it.name}${it.amount || ''}`)
+      .join('、');
+  }
+  if (event.name === 'memory_write' && out.memories?.length) {
+    return `${out.memories.length} 条记忆`;
+  }
+  if (event.name?.startsWith('memory_delete')) {
+    return out.memory_action?.summary || out.speech || null;
+  }
+  if (event.name === 'inventory_update' && out.items?.length) {
+    return `${out.items.length} 项库存`;
+  }
+  if (event.name === 'provider_call' && out.latency_ms) {
+    return `响应 ${out.latency_ms}ms`;
+  }
+  if (event.name === 'provider_error') return '已用本地方案继续';
+  return null;
+}
+
+function eventStatus(event) {
+  const status = event.status || 'success';
+  const isError = status === 'fallback' || status === 'error';
+  return {
+    status,
+    isError,
+    className: isError ? 'error' : 'done',
+  };
+}
+
 export default function ToolTimeline({ events }) {
-  const list = (events || []).slice(-12);
-  const lastIdx = list.length - 1;
+  const list = (events || []).slice(-5);
+  const current = list[list.length - 1] || null;
+  const completed = list.slice(0, -1).reverse().slice(0, 4);
+  const currentMeta = current ? describe(current) : null;
+  const currentDesc = current ? eventDescription(current) : null;
+  const currentStatus = current ? eventStatus(current) : null;
 
   return (
-    <div className="rp-section" style={{ flex: '0 0 auto' }}>
+    <div className="rp-section agent-work">
       <div className="rp-head">
-        <span className="section-label">任务进程</span>
-        {list.length ? (
+        <span className="section-label">Agent 正在处理</span>
+        {current ? (
           <span className="rp-aux live">
             <span className="dot">●</span> 实时更新
           </span>
@@ -73,75 +115,68 @@ export default function ToolTimeline({ events }) {
         )}
       </div>
 
-      <div className="timeline">
-        {list.length === 0 ? (
-          <div className="timeline-empty">
-            等待语音、视觉或烹饪动作。触发后，这里会显示妮妮的处理进程。
-          </div>
-        ) : (
-          list.map((event, i) => {
-            const meta = describe(event);
-            const out = event.output || event.output_json || {};
-            const status = event.status || 'success';
-            const isError = status === 'fallback' || status === 'error';
-            const isRecent = i === lastIdx;
-            const cls = isError
-              ? 'error'
-              : isRecent
-              ? 'running'
-              : 'done';
-            const desc = (() => {
-              if (event.name === 'recipe_plan') return out.dish_name;
-              if (event.name === 'recipe_adjust' && out.adjustments?.length)
-                return out.adjustments.slice(0, 2).join('；');
-              if (event.name === 'vision_observe')
-                return out.observation?.ingredients
-                  ?.slice(0, 3)
-                  .map((it) => `${it.name}${it.amount}`)
-                  .join('、');
-              if (event.name === 'memory_write' && out.memories?.length)
-                return `${out.memories.length} 条记忆`;
-              if (event.name?.startsWith('memory_delete'))
-                return out.memory_action?.summary || out.speech || null;
-              if (event.name === 'inventory_update' && out.items?.length)
-                return `${out.items.length} 项库存`;
-              if (event.name === 'provider_call' && out.latency_ms)
-                return `响应 ${out.latency_ms}ms`;
-              if (event.name === 'provider_error')
-                return '已用本地方案继续';
-              return null;
-            })();
-            return (
-              <div
-                key={event.id || `${event.name}-${i}`}
-                className={`timeline-row ${cls}`}
+      {!current ? (
+        <div className="agent-empty">等待你的下一句话。</div>
+      ) : (
+        <>
+          <div
+            className={`agent-current-card ${
+              currentStatus.isError ? 'error' : 'running'
+            }`}
+          >
+            <div className="agent-current-kicker">当前任务</div>
+            <div className="agent-current-title">{currentMeta.label}</div>
+            {currentDesc ? (
+              <div className="agent-current-desc">{currentDesc}</div>
+            ) : null}
+            <div className="timeline-tags">
+              {currentMeta.local ? (
+                <span className="tag-mini local">本地即时响应</span>
+              ) : (
+                <span className="tag-mini tool">{currentMeta.tool}</span>
+              )}
+              <span
+                className={`tag-mini ${
+                  currentStatus.isError ? 'fallback' : 'status'
+                }`}
               >
-                <span className="timeline-icon">
-                  {isError ? '!' : isRecent ? '●' : '✓'}
-                </span>
-                <div className="timeline-body">
-                  <div className="timeline-label">
-                    {String(i + 1).padStart(2, '0')} · {meta.label}
-                  </div>
-                  {desc ? <div className="timeline-meta">{desc}</div> : null}
-                  <div className="timeline-tags">
-                    {meta.local ? (
-                      <span className="tag-mini local">
-                        本地即时响应
+                {statusText(currentStatus.status, currentStatus.isError)}
+              </span>
+            </div>
+          </div>
+
+          <div className="agent-completed">
+            <div className="agent-subtitle">刚刚完成</div>
+            {completed.length ? (
+              <div className="agent-completed-list">
+                {completed.map((event, i) => {
+                  const meta = describe(event);
+                  const desc = eventDescription(event);
+                  const { className, isError } = eventStatus(event);
+                  return (
+                    <div
+                      className={`agent-completed-row ${className}`}
+                      key={event.id || `${event.name}-${i}`}
+                    >
+                      <span className="agent-completed-icon">
+                        {isError ? '!' : '✓'}
                       </span>
-                    ) : (
-                      <span className="tag-mini tool">{meta.tool}</span>
-                    )}
-                    <span className={`tag-mini ${isError ? 'fallback' : 'status'}`}>
-                      {statusText(status, isError)}
-                    </span>
-                  </div>
-                </div>
+                      <span className="agent-completed-label">
+                        {meta.label}
+                      </span>
+                      {desc ? (
+                        <span className="agent-completed-desc">{desc}</span>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })
-        )}
-      </div>
+            ) : (
+              <div className="agent-empty small">暂无更多任务</div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
