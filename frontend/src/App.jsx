@@ -623,6 +623,7 @@ export default function App() {
             uiMode={state.ui_mode || 'planning'}
             events={combinedEvents}
             memories={memories}
+            state={state}
             inventory={inventory}
             providerLogs={providerLogs}
             health={health}

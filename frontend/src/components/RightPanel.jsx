@@ -6,6 +6,7 @@ import InventoryPanel from './InventoryPanel.jsx';
 export default function RightPanel({
   events,
   memories,
+  state,
   inventory,
   providerLogs,
   health,
@@ -22,7 +23,11 @@ export default function RightPanel({
   return (
     <div className="rightpanel">
       <ToolTimeline events={events} />
-      <MemoryPanel memories={memories} highlight={highlight} />
+      <MemoryPanel
+        memories={memories}
+        highlight={highlight}
+        pendingAction={state?.pending_action}
+      />
       <InventoryPanel
         inventory={inventory}
         providerLogs={providerLogs}

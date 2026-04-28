@@ -23,6 +23,61 @@ def _memory_text(memory: Dict[str, Any]) -> str:
     return str(value)
 
 
+def _normalize_query(query: str) -> str:
+    return "".join(str(query or "").split()).strip("。！？!?.,，；;：:、 ")
+
+
+def summarize_memory(memory: Optional[Dict[str, Any]]) -> str:
+    if not memory:
+        return "这条记忆"
+    subject = memory.get("subject")
+    key = memory.get("key")
+    text = _memory_text(memory)
+    if subject == "mother" and ("辣" in key or "辣" in text):
+        return "妈妈不吃辣"
+    if subject == "user" and ("酸" in key or "酸" in text):
+        return "用户不喜欢太酸"
+    if subject == "user" and ("减脂" in text or key in {"diet.goal", "health_goal.diet"}):
+        return f"用户{text}"
+    if subject == "mother":
+        return f"妈妈{text}"
+    if subject == "user":
+        return f"用户{text}"
+    return text
+
+
+def _score_memory(memory: Dict[str, Any], query: str, recency_rank: int) -> int:
+    text = _memory_text(memory)
+    haystack = _normalize_query(
+        " ".join(
+            [
+                str(memory.get("type") or ""),
+                str(memory.get("subject") or ""),
+                str(memory.get("key") or ""),
+                text,
+                summarize_memory(memory),
+            ]
+        )
+    )
+    score = recency_rank
+    if not query:
+        return score
+    if query in haystack or haystack in query:
+        score += 80
+    if "妈妈" in query and memory.get("subject") == "mother":
+        score += 40
+    if any(token in query for token in ["我", "用户"]) and memory.get("subject") == "user":
+        score += 20
+    for token in ["辣", "酸", "减脂", "不吃辣", "不喜欢太酸"]:
+        if token in query and token in haystack:
+            score += 30
+    for token in [text, str(memory.get("key") or "")]:
+        normalized = _normalize_query(token)
+        if normalized and normalized in query:
+            score += 40
+    return score
+
+
 def write_memory(
     terminal_id: str,
     memory_write: MemoryWrite | Dict[str, Any],
@@ -55,6 +110,37 @@ def write_memories(
 
 def list_memories(terminal_id: str, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     return database.list_memories(terminal_id, db_path=db_path)
+
+
+def find_memory_candidates(
+    terminal_id: str,
+    query: str,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    memories = list_memories(terminal_id, db_path=db_path)
+    if not memories:
+        return []
+    normalized = _normalize_query(query)
+    recent_first = list(reversed(memories))
+    if any(token in normalized for token in ["刚才那个记错了", "这个记错了", "刚才记错了"]):
+        return recent_first
+
+    scored = []
+    for index, item in enumerate(recent_first):
+        recency_rank = len(memories) - index
+        score = _score_memory(item, normalized, recency_rank)
+        if score > recency_rank:
+            scored.append((score, item))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in scored]
+
+
+def delete_memory(
+    terminal_id: str,
+    memory_id: str,
+    db_path: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    return database.delete_memory(terminal_id, memory_id, db_path=db_path)
 
 
 def search_memories(

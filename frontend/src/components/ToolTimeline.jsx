@@ -2,6 +2,10 @@ import React from 'react';
 
 const EVENT_LABELS = {
   memory_write: { label: '记住家庭偏好', tool: '家庭记忆' },
+  memory_delete_pending: { label: '准备修改家庭记忆', tool: '家庭记忆', local: true },
+  memory_delete: { label: '删除家庭记忆', tool: '家庭记忆', local: true },
+  memory_delete_cancel: { label: '保留家庭记忆', tool: '家庭记忆', local: true },
+  memory_delete_not_found: { label: '未找到相关记忆', tool: '家庭记忆', local: true },
   inventory_update: { label: '更新食材库存', tool: '食材库存' },
   recipe_plan: { label: '生成晚餐方案', tool: '晚餐方案' },
   recipe_adjust: { label: '调整烹饪方案', tool: '烹饪方案' },
@@ -97,6 +101,8 @@ export default function ToolTimeline({ events }) {
                   .join('、');
               if (event.name === 'memory_write' && out.memories?.length)
                 return `${out.memories.length} 条记忆`;
+              if (event.name?.startsWith('memory_delete'))
+                return out.memory_action?.summary || out.speech || null;
               if (event.name === 'inventory_update' && out.items?.length)
                 return `${out.items.length} 项库存`;
               if (event.name === 'provider_call' && out.latency_ms)

@@ -91,6 +91,10 @@ VISION_COMMANDS = {
     "看一下我现在有什么",
 }
 
+MEMORY_CONFIRM_COMMANDS = {"确认", "可以", "对", "删掉", "是的"}
+MEMORY_CANCEL_COMMANDS = {"取消", "算了", "不用了", "先别删"}
+RECENT_MEMORY_DELETE_COMMANDS = {"刚才那个记错了", "这个记错了", "刚才记错了"}
+
 
 def normalize_voice_text(text: str) -> str:
     normalized = text.strip().strip(TRAILING_PUNCTUATION)
@@ -135,6 +139,33 @@ def _frontend_action_route(intent: str, normalized_text: str, reason: str) -> Vo
     )
 
 
+def _memory_action_route(intent: str, normalized_text: str, reason: str) -> VoiceRouteResult:
+    return VoiceRouteResult(
+        route="memory_action",
+        intent=intent,
+        command=intent,
+        confidence=0.96,
+        reason=reason,
+        normalized_text=normalized_text,
+    )
+
+
+def _is_memory_delete_request(normalized_text: str) -> bool:
+    if normalized_text in RECENT_MEMORY_DELETE_COMMANDS:
+        return True
+    if normalized_text.startswith("不要记") and normalized_text.endswith("了"):
+        return True
+    if normalized_text.startswith("删除") and "记忆" in normalized_text:
+        return True
+    if normalized_text.startswith("把") and "记忆" in normalized_text and any(
+        token in normalized_text for token in ["删掉", "删除"]
+    ):
+        return True
+    if "从记忆里" in normalized_text and any(token in normalized_text for token in ["删掉", "删除"]):
+        return True
+    return False
+
+
 def route_voice_text(text: str, state: Optional[Dict[str, Any]] = None) -> VoiceRouteResult:
     """Route only high-confidence voice commands to the local P0 state machine."""
 
@@ -143,6 +174,12 @@ def route_voice_text(text: str, state: Optional[Dict[str, Any]] = None) -> Voice
         return _agent_route(normalized, "empty_text")
 
     ui_mode = (state or {}).get("ui_mode", "planning")
+    if normalized in MEMORY_CONFIRM_COMMANDS:
+        return _memory_action_route("memory_delete_confirm", normalized, "memory_delete_confirmation")
+    if normalized in MEMORY_CANCEL_COMMANDS:
+        return _memory_action_route("memory_delete_cancel", normalized, "memory_delete_cancellation")
+    if _is_memory_delete_request(normalized):
+        return _memory_action_route("memory_delete_request", normalized, "memory_delete_request")
     if normalized in VISION_COMMANDS:
         return _frontend_action_route("start_vision", normalized, "vision_capture_request")
     if ui_mode == "cooking" and normalized in COOKING_NEXT_COMMANDS:

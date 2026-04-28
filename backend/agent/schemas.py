@@ -65,6 +65,7 @@ class TerminalStateSnapshot(BaseModel):
     timer_remaining_seconds: int = 0
     active_adjustments: List[str] = Field(default_factory=list)
     last_speech: str = ""
+    pending_action: Optional[Dict[str, Any]] = None
     updated_at: Optional[str] = None
 
 

@@ -219,6 +219,10 @@ def apply_control(command: str, terminal_id: str, db_path: Optional[str] = None)
         raise ValueError(f"Unsupported control command: {command}")
 
     state = handlers[command](terminal_id, db_path=db_path)
+    if state.get("pending_action"):
+        state = dict(state)
+        state.pop("pending_action", None)
+        state = database.save_state(terminal_id, state, db_path=db_path)
     speech = current_step_speech(state) if command == "repeat_current_step" else state.get("last_speech", "")
     output_json = {
         "model_called": False,

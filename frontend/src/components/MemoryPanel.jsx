@@ -8,11 +8,17 @@ const TYPE_COLORS = {
   profile: 'var(--c-mid)',
 };
 const TYPE_LABELS = {
-  health_goal: 'HEALTH',
-  allergy_or_restriction: 'RESTRICT',
-  preference: 'PREF',
-  cooking_note: 'NOTE',
-  profile: 'PROFILE',
+  health_goal: '健康目标',
+  allergy_or_restriction: '饮食限制',
+  preference: '口味偏好',
+  cooking_note: '烹饪记录',
+  profile: '家庭成员',
+};
+const SOURCE_LABELS = {
+  user_explicit: '用户告诉我',
+  inferred: '妮妮推断',
+  vision: '视觉识别',
+  review: '烹饪复盘',
 };
 
 function memoryText(m) {
@@ -22,9 +28,23 @@ function memoryText(m) {
   return v.text || v.value || JSON.stringify(v);
 }
 
-export default function MemoryPanel({ memories, highlight }) {
+function shortTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export default function MemoryPanel({ memories, highlight, pendingAction }) {
   const list = memories || [];
   const latestId = list[list.length - 1]?.id;
+  const pendingDelete =
+    pendingAction?.type === 'delete_memory' ? pendingAction : null;
   return (
     <div
       className="rp-section scroll"
@@ -32,16 +52,22 @@ export default function MemoryPanel({ memories, highlight }) {
     >
       <div className="rp-head">
         <span className="section-label">张家厨房记忆</span>
-        <span className="rp-aux">{list.length} entries</span>
+        <span className="rp-aux">{list.length} 条</span>
       </div>
+      {pendingDelete ? (
+        <div className="memory-pending">
+          等待确认删除：{pendingDelete.summary || '这条记忆'}
+        </div>
+      ) : null}
       {list.length === 0 ? (
         <div className="memory-empty">
-          暂无记忆。规划晚餐时妮妮会写入 health_goal / restriction / preference。
+          暂无家庭记忆。你告诉妮妮的口味和饮食习惯会出现在这里。
         </div>
       ) : (
         list.map((m) => {
           const color = TYPE_COLORS[m.type] || 'var(--c-terra)';
           const isLatest = highlight && m.id === latestId;
+          const updatedAt = shortTime(m.updated_at);
           return (
             <div
               key={m.id}
@@ -53,7 +79,13 @@ export default function MemoryPanel({ memories, highlight }) {
               >
                 {TYPE_LABELS[m.type] || m.type}
               </span>
-              <span className="memory-text">{memoryText(m)}</span>
+              <div className="memory-main">
+                <span className="memory-text">{memoryText(m)}</span>
+                <span className="memory-meta">
+                  {SOURCE_LABELS[m.source] || '家庭记忆'}
+                  {updatedAt ? ` · ${updatedAt}` : ''}
+                </span>
+              </div>
             </div>
           );
         })

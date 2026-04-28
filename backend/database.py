@@ -624,6 +624,41 @@ def list_memories(terminal_id: str, db_path: Optional[str] = None) -> List[Dict[
     ]
 
 
+def delete_memory(
+    terminal_id: str,
+    memory_id: str,
+    db_path: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    ensure_terminal(terminal_id, db_path=db_path)
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT id, terminal_id, type, subject, key, value_json, confidence, source, created_at, updated_at
+            FROM memories
+            WHERE terminal_id = ? AND id = ?
+            """,
+            (terminal_id, memory_id),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "DELETE FROM memories WHERE terminal_id = ? AND id = ?",
+            (terminal_id, memory_id),
+        )
+    return {
+        "id": row["id"],
+        "terminal_id": row["terminal_id"],
+        "type": row["type"],
+        "subject": row["subject"],
+        "key": row["key"],
+        "value_json": _json_loads(row["value_json"]),
+        "confidence": row["confidence"],
+        "source": row["source"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def list_inventory_items(terminal_id: str, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     ensure_terminal(terminal_id, db_path=db_path)
     with _connect(db_path) as conn:

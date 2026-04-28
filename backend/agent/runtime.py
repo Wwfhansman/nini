@@ -152,6 +152,199 @@ def _handle_start_vision(
     }
 
 
+def _memory_action_response(
+    terminal_id: str,
+    state: Dict[str, Any],
+    event_name: str,
+    speech: str,
+    memory_action: Dict[str, Any],
+    voice_route: Any,
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    output_json = {
+        "model_called": False,
+        "speech": speech,
+        "memory_action": memory_action,
+        "voice_route": voice_route.to_dict(),
+    }
+    next_state = dict(state)
+    next_state["last_speech"] = speech
+    next_state = database.save_state(terminal_id, next_state, db_path=db_path)
+    event = database.add_tool_event(
+        terminal_id=terminal_id,
+        event_type="local_control",
+        name=event_name,
+        input_json={"intent": voice_route.intent, "text": voice_route.normalized_text},
+        output_json=output_json,
+        status="success",
+        db_path=db_path,
+    )
+    return {
+        "data": output_json,
+        "state": next_state,
+        "events": [event],
+    }
+
+
+def _handle_memory_delete_request(
+    terminal_id: str,
+    state: Dict[str, Any],
+    voice_route: Any,
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    state = dict(state)
+    state.pop("pending_action", None)
+    candidates = memory.find_memory_candidates(terminal_id, voice_route.normalized_text, db_path=db_path)
+    if not candidates:
+        speech = "我没有找到相关的家庭记忆，先不做删除。"
+        return _memory_action_response(
+            terminal_id,
+            state,
+            "memory_delete_not_found",
+            speech,
+            {"type": "not_found", "memory_id": None, "summary": None},
+            voice_route,
+            db_path,
+        )
+
+    target = candidates[0]
+    summary = memory.summarize_memory(target)
+    next_state = dict(state)
+    next_state["pending_action"] = {
+        "type": "delete_memory",
+        "memory_id": target["id"],
+        "summary": summary,
+        "created_at": database.utc_now(),
+    }
+    speech = f"确认删除“{summary}”这条家庭记忆吗？"
+    return _memory_action_response(
+        terminal_id,
+        next_state,
+        "memory_delete_pending",
+        speech,
+        {
+            "type": "delete_pending",
+            "memory_id": target["id"],
+            "summary": summary,
+        },
+        voice_route,
+        db_path,
+    )
+
+
+def _handle_memory_delete_confirm(
+    terminal_id: str,
+    state: Dict[str, Any],
+    voice_route: Any,
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    pending = state.get("pending_action") or {}
+    if pending.get("type") != "delete_memory":
+        speech = "当前没有需要确认的记忆操作。"
+        return _memory_action_response(
+            terminal_id,
+            state,
+            "memory_delete_not_found",
+            speech,
+            {"type": "not_found", "memory_id": None, "summary": None},
+            voice_route,
+            db_path,
+        )
+
+    memory_id = str(pending.get("memory_id") or "")
+    summary = str(pending.get("summary") or "这条记忆")
+    deleted = memory.delete_memory(terminal_id, memory_id, db_path=db_path) if memory_id else None
+    next_state = dict(state)
+    next_state.pop("pending_action", None)
+    if not deleted:
+        speech = "这条家庭记忆已经不存在了，我已清空待确认操作。"
+        return _memory_action_response(
+            terminal_id,
+            next_state,
+            "memory_delete_not_found",
+            speech,
+            {"type": "not_found", "memory_id": memory_id or None, "summary": summary},
+            voice_route,
+            db_path,
+        )
+
+    speech = "已删除这条家庭记忆。"
+    return _memory_action_response(
+        terminal_id,
+        next_state,
+        "memory_delete",
+        speech,
+        {"type": "deleted", "memory_id": memory_id, "summary": summary},
+        voice_route,
+        db_path,
+    )
+
+
+def _handle_memory_delete_cancel(
+    terminal_id: str,
+    state: Dict[str, Any],
+    voice_route: Any,
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    pending = state.get("pending_action") or {}
+    if pending.get("type") != "delete_memory":
+        speech = "当前没有需要取消的记忆操作。"
+        return _memory_action_response(
+            terminal_id,
+            state,
+            "memory_delete_not_found",
+            speech,
+            {"type": "not_found", "memory_id": None, "summary": None},
+            voice_route,
+            db_path,
+        )
+    next_state = dict(state)
+    next_state.pop("pending_action", None)
+    summary = str(pending.get("summary") or "这条记忆")
+    speech = "好的，已保留这条记忆。"
+    return _memory_action_response(
+        terminal_id,
+        next_state,
+        "memory_delete_cancel",
+        speech,
+        {
+            "type": "cancel",
+            "memory_id": pending.get("memory_id"),
+            "summary": summary,
+        },
+        voice_route,
+        db_path,
+    )
+
+
+def _handle_memory_action(
+    terminal_id: str,
+    state: Dict[str, Any],
+    voice_route: Any,
+    db_path: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if voice_route.intent == "memory_delete_request":
+        return _handle_memory_delete_request(terminal_id, state, voice_route, db_path)
+    if voice_route.intent == "memory_delete_confirm":
+        return _handle_memory_delete_confirm(terminal_id, state, voice_route, db_path)
+    if voice_route.intent == "memory_delete_cancel":
+        return _handle_memory_delete_cancel(terminal_id, state, voice_route, db_path)
+    return None
+
+
+def _clear_stale_pending_delete(
+    terminal_id: str,
+    state: Dict[str, Any],
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    pending = state.get("pending_action") or {}
+    if pending.get("type") != "delete_memory":
+        return state
+    next_state = dict(state)
+    next_state.pop("pending_action", None)
+    return database.save_state(terminal_id, next_state, db_path=db_path)
+
+
 def handle_chat(
     request: ChatRequest,
     db_path: Optional[str] = None,
@@ -161,6 +354,11 @@ def handle_chat(
     terminal_id = request.terminal_id or settings.default_terminal_id
     state = terminal_state.get_state(terminal_id, db_path=resolved_db_path)
     voice_route = route_voice_text(request.text, state)
+    if voice_route.route == "memory_action":
+        result = _handle_memory_action(terminal_id, state, voice_route, resolved_db_path)
+        if result is not None:
+            return result
+    state = _clear_stale_pending_delete(terminal_id, state, resolved_db_path)
     if voice_route.route == "local_control" and voice_route.command:
         result = terminal_state.apply_control(voice_route.command, terminal_id, db_path=resolved_db_path)
         result["data"]["voice_route"] = voice_route.to_dict()
