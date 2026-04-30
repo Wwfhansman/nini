@@ -19,6 +19,7 @@ import useVoiceSession from './hooks/useVoiceSession.js';
 const DEMO_PLAN_TEXT =
   '我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？';
 const DEMO_SOUR_TEXT = '记住我不喜欢太酸';
+const AUTO_PLAYBACK_TIMEOUT_MS = 16000;
 
 const nowTime = () =>
   new Date().toLocaleTimeString('zh-CN', {
@@ -69,13 +70,23 @@ function playAudioBase64({
   const audio = new Audio(src);
   return new Promise((resolve) => {
     let settled = false;
+    const timer = window.setTimeout(() => {
+      try {
+        audio.pause();
+      } catch {
+        // Browser may have already disposed the audio element.
+      }
+      done({ played: false, reason: 'timeout' });
+    }, AUTO_PLAYBACK_TIMEOUT_MS);
     const done = (result) => {
       if (settled) return;
       settled = true;
+      window.clearTimeout(timer);
       resolve(result);
     };
     audio.onended = () => done({ played: true, reason: 'played' });
     audio.onerror = () => done({ played: false, reason: 'playback_error' });
+    audio.onabort = () => done({ played: false, reason: 'playback_error' });
     audio.play().catch(() => done({ played: false, reason: 'blocked' }));
   });
 }
@@ -88,6 +99,9 @@ function playbackNotice(result, manual = false) {
   }
   if (result?.reason === 'playback_error') {
     return '语音音频暂时无法播放，已保留文字回复。';
+  }
+  if (result?.reason === 'timeout') {
+    return '语音播放时间过长，已先恢复识别。';
   }
   return '当前暂无可播放语音，已保留文字回复。';
 }

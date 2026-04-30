@@ -107,15 +107,30 @@ def test_voice_session_wake_vision_command_is_local(tmp_path, monkeypatch):
     assert response["events"][0]["output"]["model_called"] is False
 
 
-def test_voice_session_no_wake_does_not_trigger_agent(tmp_path, monkeypatch):
+def test_voice_session_wake_free_cooking_control_routes_to_local_control(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _prepare_cooking(client)
 
     with client.websocket_connect("/ws/voice") as ws:
         _start_session(ws)
         ws.send_json({"type": "asr.inject_final", "text": "下一步"})
+        response, messages = _receive_until(ws, "agent.response")
+
+    assert any(message["type"] == "asr.final" and message["text"] == "下一步" for message in messages)
+    assert response["data"]["model_called"] is False
+    assert response["data"]["voice_route"]["command"] == "next_step"
+    assert response["state"]["current_step_index"] == 1
+
+
+def test_voice_session_no_wake_free_text_does_not_trigger_agent(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _prepare_cooking(client)
+
+    with client.websocket_connect("/ws/voice") as ws:
+        _start_session(ws)
+        ws.send_json({"type": "asr.inject_final", "text": "今天随便聊聊"})
         final, _ = _receive_until(ws, "asr.final")
-        assert final["text"] == "下一步"
+        assert final["text"] == "今天随便聊聊"
         time.sleep(0.05)
 
     state_payload = client.get(f"/api/state?terminal_id={TERMINAL_ID}").json()["data"]

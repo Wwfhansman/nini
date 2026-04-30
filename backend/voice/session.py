@@ -12,6 +12,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from backend import database
 from backend.agent import runtime
 from backend.agent.schemas import ChatRequest
+from backend.agent.voice_router import route_voice_text
 from backend.config import Settings, get_settings
 from backend.speech.schemas import SpeechProviderError
 from backend.speech.streaming_asr import (
@@ -28,6 +29,14 @@ from backend.voice.schemas import VoiceClientMessage, VoiceState
 
 TRAILING_PUNCTUATION = "。！？!?.,，；;：:、 \t\r\n"
 ASR_FINAL_FALLBACK_SECONDS = 1.2
+WAKE_FREE_COOKING_COMMANDS = {
+    "next_step",
+    "previous_step",
+    "pause",
+    "resume",
+    "repeat_current_step",
+    "finish",
+}
 
 
 def public_event(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -399,6 +408,9 @@ class VoiceWebSocketSession:
         if self.state == "listening_for_wake":
             detected, remainder = strip_wake_word(command_text, self.settings.voice_wake_words)
             if not detected:
+                handled = await self._handle_wake_free_cooking_command(command_text)
+                if handled:
+                    self.last_effective_final_at = now
                 return
             self.last_effective_final_at = now
             await self._send({"type": "wake.detected", "text": text})
@@ -413,6 +425,21 @@ class VoiceWebSocketSession:
         command_text = command_text.strip(TRAILING_PUNCTUATION)
         if command_text:
             await self._handle_agent_command(command_text)
+
+    async def _handle_wake_free_cooking_command(self, text: str) -> bool:
+        """Allow unprefixed hands-free P0 controls while the cooking screen is active."""
+        try:
+            terminal_snapshot = terminal_state.get_state(self.terminal_id, db_path=self.settings.db_path)
+        except Exception:
+            return False
+        if terminal_snapshot.get("ui_mode") != "cooking":
+            return False
+        route = route_voice_text(text, terminal_snapshot)
+        if route.route != "local_control" or route.command not in WAKE_FREE_COOKING_COMMANDS:
+            return False
+        await self._send_state("active_listening")
+        await self._handle_agent_command(text.strip(TRAILING_PUNCTUATION))
+        return True
 
     async def _handle_agent_command(self, text: str) -> None:
         await self._send_state("thinking")

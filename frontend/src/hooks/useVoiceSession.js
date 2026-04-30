@@ -300,6 +300,7 @@ export default function useVoiceSession({ terminalId, onAgentEvent, onAgentRespo
       }
       if (payload.type === 'agent.response') {
         const transcript = pendingFinalRef.current;
+        pendingFinalRef.current = '';
         const response = {
           ok: true,
           data: payload.data || { speech: payload.speech || '' },
