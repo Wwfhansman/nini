@@ -14,7 +14,7 @@ import TopBar from './components/TopBar.jsx';
 import LeftPanel from './components/LeftPanel.jsx';
 import CenterPanel from './components/CenterPanel.jsx';
 import RightPanel from './components/RightPanel.jsx';
-import useVoiceRecorder from './hooks/useVoiceRecorder.js';
+import useVoiceSession from './hooks/useVoiceSession.js';
 
 const DEMO_PLAN_TEXT =
   '我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？';
@@ -27,6 +27,12 @@ const nowTime = () =>
   });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function initialTtsVendor() {
+  if (typeof window === 'undefined') return 'bytedance';
+  const value = window.localStorage.getItem('nini_tts_vendor');
+  return value === 'xiaomi' || value === 'bytedance' ? value : 'bytedance';
+}
 
 function audioExtension(mimeType) {
   if (mimeType?.includes('mp4')) return 'm4a';
@@ -103,6 +109,7 @@ export default function App() {
   const [chatLog, setChatLog] = useState([]);
 
   const [voiceStatus, setVoiceStatus] = useState('idle');
+  const [ttsVendor, setTtsVendor] = useState(initialTtsVendor);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -122,13 +129,6 @@ export default function App() {
 
   const visionInputRef = useRef(null);
   const audioInputRef = useRef(null);
-  const {
-    recordingState,
-    error: recorderError,
-    durationMs,
-    startRecording,
-    stopRecording,
-  } = useVoiceRecorder();
 
   // wall clock
   useEffect(() => {
@@ -249,12 +249,20 @@ export default function App() {
   const requestSpeechPlayback = useCallback(
     async (text, source = 'tts') => {
       if (!text) return { played: false, reason: 'no_speech' };
-      const resp = await postSpeechTts(terminalId, text);
+      const resp = await postSpeechTts(terminalId, text, ttsVendor);
       appendEvents(resp, source);
       return playAudioBase64(resp?.data || {});
     },
-    [appendEvents, terminalId],
+    [appendEvents, terminalId, ttsVendor],
   );
+
+  const handleTtsVendorChange = useCallback((vendor) => {
+    const next = vendor === 'xiaomi' ? 'xiaomi' : 'bytedance';
+    setTtsVendor(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('nini_tts_vendor', next);
+    }
+  }, []);
 
   const speakResponseSpeech = useCallback(
     async (resp, source = 'auto-tts') => {
@@ -274,6 +282,36 @@ export default function App() {
     },
     [requestSpeechPlayback],
   );
+
+  const handleVoiceAgentEvent = useCallback((event) => {
+    if (!event) return;
+    setRecentEvents((prev) => [...prev, { ...event, _source: 'voice-session' }]);
+    setHighlightTrigger((n) => n + 1);
+  }, []);
+
+  const handleVoiceAgentResponse = useCallback(
+    async (resp, transcript) => {
+      setLoading(true);
+      try {
+        applyResponse(resp, {
+          fromUserText: transcript,
+          source: 'voice-session',
+        });
+        await syncFullState();
+        await speakResponseSpeech(resp, 'voice-session-tts');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyResponse, speakResponseSpeech, syncFullState],
+  );
+
+  const voiceSession = useVoiceSession({
+    terminalId,
+    onAgentEvent: handleVoiceAgentEvent,
+    onAgentResponse: handleVoiceAgentResponse,
+    onError: setNotice,
+  });
 
   const runRecordedVoiceTurn = useCallback(
     async (audio, source = 'recording') => {
@@ -426,49 +464,18 @@ export default function App() {
   }, []);
 
   const handleVoicePrimary = useCallback(async () => {
-    if (recordingState === 'unsupported') {
-      setError('当前浏览器不支持录音，请使用上传录音兜底。');
-      return;
-    }
-    if (recordingState === 'denied') {
-      setError('麦克风权限被拒绝，请使用上传录音兜底。');
-      return;
-    }
-    if (recordingState === 'recording' || voiceStatus === 'recording') {
-      setError(null);
-      setVoiceStatus('stopping');
-      const blob = await stopRecording();
-      if (!blob || blob.size === 0) {
-        setError('没有录到有效语音，请再试一次。');
-        setVoiceStatus('idle');
-        return;
-      }
-      await runRecordedVoiceTurn(blob, 'recording');
-      return;
-    }
-    if (
-      ['requesting', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
-        voiceStatus,
-      )
-    ) {
-      return;
-    }
-
     setError(null);
-    setVoiceStatus('requesting');
-    const started = await startRecording();
-    setVoiceStatus(started ? 'recording' : 'idle');
-  }, [
-    recordingState,
-    runRecordedVoiceTurn,
-    startRecording,
-    stopRecording,
-    voiceStatus,
-  ]);
+    setNotice(null);
+    if (voiceSession.isActive) {
+      await voiceSession.sleepSession();
+      return;
+    }
+    await voiceSession.startSession();
+  }, [voiceSession]);
 
   useEffect(() => {
-    if (recorderError) setError(recorderError);
-  }, [recorderError]);
+    if (voiceSession.error) setError(voiceSession.error);
+  }, [voiceSession.error]);
 
   const handleAudioInputChange = useCallback(
     async (event) => {
@@ -595,10 +602,15 @@ export default function App() {
     return dedup;
   }, [toolEventsServer, recentEvents]);
 
+  const recorderError = voiceSession.error;
+  const recordingDurationMs = voiceSession.durationMs;
+  const recordingState = ['unsupported', 'denied'].includes(voiceSession.sessionState)
+    ? voiceSession.sessionState
+    : voiceSession.isActive
+      ? 'recording'
+      : 'idle';
   const voiceDisplayStatus =
-    voiceStatus === 'idle' && ['unsupported', 'denied'].includes(recordingState)
-      ? recordingState
-      : voiceStatus;
+    voiceSession.sessionState !== 'sleeping' ? voiceSession.sessionState : voiceStatus;
 
   return (
     <div className="app-root">
@@ -675,8 +687,12 @@ export default function App() {
             onPlayTts={playLatestSpeech}
             recordingState={recordingState}
             recorderError={recorderError}
-            recordingDurationMs={durationMs}
-            speechRecognitionHint={speechRecognitionHint}
+            recordingDurationMs={recordingDurationMs}
+            speechRecognitionHint={voiceSession.recognitionMode || speechRecognitionHint}
+            partialTranscript={voiceSession.partialTranscript}
+            finalTranscript={voiceSession.finalTranscript}
+            ttsVendor={ttsVendor}
+            onTtsVendorChange={handleTtsVendorChange}
             onQuickAction={(action) => {
               if (action === 'planning') sendControl('reset');
               else if (action === 'cooking') sendControl('start');

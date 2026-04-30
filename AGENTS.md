@@ -17,10 +17,10 @@ Follow `docs/12-development-plan.md` and `docs/14-implementation-checklist.md` w
 No app runtime exists yet. Once implementation starts, use these expected commands:
 
 ```bash
-uvicorn backend.app:app --reload
+./.venv/bin/uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Runs the FastAPI backend locally.
+Runs the FastAPI backend locally. Use the project virtualenv so WebSocket dependencies such as `websockets` are available.
 
 ```bash
 pytest backend/tests

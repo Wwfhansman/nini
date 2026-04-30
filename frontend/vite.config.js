@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
   const proxy = {
     '/api': { target, changeOrigin: true },
     '/health': { target, changeOrigin: true },
+    '/ws': { target, changeOrigin: true, ws: true },
     '/test-console': { target, changeOrigin: true },
     '/static': { target, changeOrigin: true },
   };

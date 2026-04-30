@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.config import get_settings
+from backend.speech.mimo_tts import MimoTTSProvider
 from backend.speech.volc_tts import VOLC_TTS_ENDPOINT, VolcTTSProvider
 
 
@@ -19,6 +20,12 @@ def _client(tmp_path, monkeypatch, *, speech_mode: str = "mock"):
         "VOLC_TTS_ACCESS_TOKEN",
         "VOLC_TTS_RESOURCE_ID",
         "VOLC_TTS_CLUSTER",
+        "SPEECH_TTS_VENDOR",
+        "MIMO_API_KEY",
+        "MIMO_BASE_URL",
+        "MIMO_TTS_MODEL",
+        "MIMO_TTS_VOICE",
+        "MIMO_TTS_STYLE",
     ]:
         monkeypatch.delenv(name, raising=False)
     return TestClient(app)
@@ -131,6 +138,124 @@ def test_tts_legacy_token_is_used_when_new_key_is_blank(monkeypatch):
 
     assert settings.volc_tts_access_token == "legacy-token"
     assert settings.volc_tts_configured is True
+
+
+def test_mimo_tts_settings_are_read(monkeypatch):
+    monkeypatch.setenv("MIMO_API_KEY", "mimo-key")
+    monkeypatch.setenv("SPEECH_TTS_VENDOR", "xiaomi")
+
+    settings = get_settings()
+
+    assert settings.mimo_tts_configured is True
+    assert settings.speech_tts_vendor == "xiaomi"
+
+
+def test_mimo_tts_provider_parses_success_response(monkeypatch):
+    monkeypatch.setenv("MIMO_API_KEY", "mimo-key")
+    monkeypatch.setenv("MIMO_TTS_VOICE", "茉莉")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "audio": {
+                                "data": "base64audio",
+                            }
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            assert url == "https://api.xiaomimimo.com/v1/chat/completions"
+            assert headers["api-key"] == "mimo-key"
+            assert json["model"] == "mimo-v2.5-tts"
+            assert json["messages"][0]["role"] == "user"
+            assert json["messages"][1] == {"role": "assistant", "content": "进入下一步。"}
+            assert json["audio"] == {"format": "wav", "voice": "茉莉"}
+            return FakeResponse()
+
+    monkeypatch.setattr("backend.speech.mimo_tts.httpx.Client", FakeClient)
+
+    result = MimoTTSProvider(get_settings()).synthesize("进入下一步。", "demo-kitchen-001")
+
+    assert result.provider == "mimo_tts"
+    assert result.audio_base64 == "base64audio"
+    assert result.mime_type == "audio/wav"
+
+
+def test_speech_tts_xiaomi_vendor_uses_mimo_provider(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, speech_mode="real")
+    monkeypatch.setenv("MIMO_API_KEY", "mimo-key")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"audio": {"data": "base64audio"}}}]}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            assert headers["api-key"] == "mimo-key"
+            return FakeResponse()
+
+    monkeypatch.setattr("backend.speech.mimo_tts.httpx.Client", FakeClient)
+
+    response = client.post(
+        "/api/speech/tts",
+        json={"terminal_id": "demo-kitchen-001", "text": "进入下一步。", "tts_vendor": "xiaomi"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["provider"] == "mimo_tts"
+    assert payload["data"]["audio_base64"] == "base64audio"
+    assert payload["data"]["mime_type"] == "audio/wav"
+    assert payload["events"][0]["output"]["requested_tts_vendor"] == "xiaomi"
+    assert payload["events"][0]["output"]["attempted_provider"] == "mimo_tts"
+
+
+def test_speech_tts_xiaomi_missing_key_falls_back_without_leaking_secret(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, speech_mode="real")
+
+    response = client.post(
+        "/api/speech/tts",
+        json={"terminal_id": "demo-kitchen-001", "text": "进入下一步。", "tts_vendor": "xiaomi"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["provider"] == "mock_tts"
+    assert payload["data"]["fallback_used"] is True
+    assert "MIMO_API_KEY" in payload["data"]["error"]
+    assert "api-key" not in str(payload).lower()
+    assert payload["events"][0]["output"]["requested_tts_vendor"] == "xiaomi"
+    assert payload["events"][0]["output"]["attempted_provider"] == "mimo_tts"
 
 
 def test_volc_tts_provider_parses_success_response(monkeypatch):

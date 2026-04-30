@@ -4,6 +4,8 @@
 // deployment) routes /api, /health, /static to the backend without CORS.
 // Set VITE_API_BASE_URL to a full origin only when you need to bypass the proxy.
 const RAW_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim();
+const RAW_WS_BASE = (import.meta.env.VITE_WS_BASE_URL || '').trim();
+const RAW_PROXY_TARGET = (import.meta.env.VITE_API_PROXY_TARGET || '').trim();
 export const API_BASE_URL = RAW_BASE.replace(/\/+$/, '');
 export const DEFAULT_TERMINAL_ID =
   (import.meta.env.VITE_DEFAULT_TERMINAL_ID || 'demo-kitchen-001').trim();
@@ -100,8 +102,12 @@ export async function postVision(terminalId, file, purpose = 'ingredients') {
   return postForm('/api/vision', fd);
 }
 
-export async function postSpeechTts(terminalId, text) {
-  return postJson('/api/speech/tts', { terminal_id: terminalId, text });
+export async function postSpeechTts(terminalId, text, ttsVendor) {
+  return postJson('/api/speech/tts', {
+    terminal_id: terminalId,
+    text,
+    tts_vendor: ttsVendor,
+  });
 }
 
 export async function postSpeechAsr(terminalId, audioFile) {
@@ -109,6 +115,21 @@ export async function postSpeechAsr(terminalId, audioFile) {
   fd.append('terminal_id', terminalId);
   if (audioFile) fd.append('audio', audioFile);
   return postForm('/api/speech/asr', fd);
+}
+
+export function getVoiceWebSocketUrl() {
+  const explicitBase =
+    RAW_WS_BASE ||
+    API_BASE_URL ||
+    (import.meta.env.DEV
+      ? RAW_PROXY_TARGET || 'http://127.0.0.1:8000'
+      : '');
+  const base =
+    explicitBase ||
+    (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+  const url = new URL('/ws/voice', base);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
 }
 
 export async function getMemoryMarkdown(terminalId) {

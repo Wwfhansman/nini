@@ -1,4 +1,5 @@
 import React from 'react';
+import { UiPatchAttention, UiPatchCards, UiPatchPhrases } from './UiPatch.jsx';
 
 function memoryText(m) {
   const v = m?.value_json;
@@ -17,6 +18,7 @@ export default function ReviewView({
   loading,
 }) {
   const recipe = state?.recipe || null;
+  const uiPatch = state?.ui_patch || {};
   const minutes = recipe?.estimated_minutes;
   const stepCount = recipe?.steps?.length || 0;
   const adjustments = state?.active_adjustments || [];
@@ -32,10 +34,14 @@ export default function ReviewView({
     <div className="view-wrap">
       <div className="view-header">
         <div className="view-eyebrow herb">烹饪完成</div>
-        <div className="view-title">本次烹饪复盘</div>
+        <div className="view-title">{uiPatch.title || '本次烹饪复盘'}</div>
+        {uiPatch.subtitle ? <div className="patch-subtitle">{uiPatch.subtitle}</div> : null}
       </div>
 
       <div className="review-layout">
+        <UiPatchAttention text={uiPatch.attention} />
+        <UiPatchCards cards={uiPatch.cards} />
+
         <div className="stats-row">
           <div className="stat-box">
             <div className="stat-val">
@@ -117,6 +123,7 @@ export default function ReviewView({
             再做一道
           </button>
         </div>
+        <UiPatchPhrases phrases={uiPatch.suggested_phrases} />
 
         {memoryMarkdown ? (
           <div className="export-md">{memoryMarkdown}</div>

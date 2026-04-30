@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.config import get_settings
+from backend.agent.schemas import sanitize_ui_patch
 
 
 def utc_now() -> str:
@@ -167,6 +168,7 @@ def save_state(terminal_id: str, state: Dict[str, Any], db_path: Optional[str] =
     ensure_terminal(terminal_id, db_path=db_path)
     now = utc_now()
     next_state = dict(state)
+    next_state["ui_patch"] = sanitize_ui_patch(next_state.get("ui_patch"))
     next_state["terminal_id"] = terminal_id
     next_state["updated_at"] = now
     with _connect(db_path) as conn:

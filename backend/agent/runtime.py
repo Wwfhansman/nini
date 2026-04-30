@@ -8,7 +8,14 @@ from typing import Any, Dict, List, Optional
 from backend import database
 from backend.agent.prompts import render_agent_messages
 from backend.agent.providers import MockAgentProvider, MockVisionProvider, ProviderError, get_agent_provider, get_vision_provider
-from backend.agent.schemas import AgentOutput, ChatRequest
+from backend.agent.schemas import AgentOutput, ChatRequest, sanitize_ui_patch
+from backend.agent.ui_patch import (
+    build_cooking_ui_patch,
+    build_planning_ui_patch,
+    build_review_ui_patch,
+    build_vision_prompt_ui_patch,
+    build_vision_ui_patch,
+)
 from backend.agent.voice_router import route_voice_text
 from backend.config import get_settings
 from backend.skills import inventory, memory, recipe, vision
@@ -130,6 +137,7 @@ def _handle_start_vision(
     next_state = dict(state)
     next_state["ui_mode"] = "vision"
     next_state["last_speech"] = speech
+    next_state["ui_patch"] = build_vision_prompt_ui_patch()
     next_state = database.save_state(terminal_id, next_state, db_path=db_path)
     output_json = {
         "model_called": False,
@@ -152,6 +160,95 @@ def _handle_start_vision(
     }
 
 
+def _is_direct_recipe_request(text: str) -> bool:
+    normalized = "".join(str(text or "").split())
+    if not normalized:
+        return False
+    if any(token in normalized for token in ["这一步怎么做", "当前步骤怎么做"]):
+        return False
+    return recipe.supports_direct_recipe_request(normalized)
+
+
+def _build_recipe_plan_context(
+    terminal_id: str,
+    request_text: str,
+    state: Dict[str, Any],
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "state": state,
+        "request_text": request_text,
+        "memories": memory.list_memories(terminal_id, db_path=db_path),
+        "inventory": inventory.inventory_summary(terminal_id, db_path=db_path),
+        "recipe_documents": database.list_recipe_documents(terminal_id, db_path=db_path),
+        "recent_messages": database.list_recent_conversations(terminal_id, db_path=db_path),
+    }
+
+
+def _handle_direct_recipe_request(
+    terminal_id: str,
+    request: ChatRequest,
+    state: Dict[str, Any],
+    db_path: Optional[str],
+) -> Dict[str, Any]:
+    database.add_conversation(
+        terminal_id,
+        "user",
+        request.text,
+        metadata_json={"source": request.source, "intent": "direct_recipe_plan"},
+        db_path=db_path,
+    )
+    plan_context = _build_recipe_plan_context(terminal_id, request.text, state, db_path)
+    planned_recipe = recipe.plan_recipe(plan_context)
+    ui_patch = build_planning_ui_patch(planned_recipe, plan_context, {})
+    speech = f"我给你规划{planned_recipe['dish_name']}，先按这个步骤做。"
+    next_state = dict(state)
+    next_state.update(
+        {
+            "ui_mode": "planning",
+            "dish_name": planned_recipe["dish_name"],
+            "recipe": planned_recipe,
+            "current_step_index": 0,
+            "timer_status": "idle",
+            "timer_remaining_seconds": 0,
+            "active_adjustments": planned_recipe.get("adjustments", []),
+            "ui_patch": ui_patch,
+            "last_speech": speech,
+        }
+    )
+    next_state = database.save_state(terminal_id, next_state, db_path=db_path)
+    event = _record_event(
+        terminal_id,
+        "recipe_plan",
+        input_json={"intent": "direct_recipe_plan"},
+        output_json={"dish_name": planned_recipe["dish_name"]},
+        db_path=db_path,
+    )
+    database.add_conversation(
+        terminal_id,
+        "assistant",
+        speech,
+        metadata_json={"intent": "plan_recipe", "provider": "local_recipe_planner"},
+        db_path=db_path,
+    )
+    return {
+        "data": {
+            "speech": speech,
+            "intent": "plan_recipe",
+            "ui_patch": ui_patch,
+            "provider": {
+                "mode": get_settings().demo_mode,
+                "name": "local_recipe_planner",
+                "model": None,
+                "fallback_used": False,
+                "error": None,
+            },
+        },
+        "state": next_state,
+        "events": [event],
+    }
+
+
 def _memory_action_response(
     terminal_id: str,
     state: Dict[str, Any],
@@ -169,6 +266,23 @@ def _memory_action_response(
     }
     next_state = dict(state)
     next_state["last_speech"] = speech
+    if memory_action.get("type") == "delete_pending":
+        next_state["ui_patch"] = sanitize_ui_patch(
+            {
+                "title": "确认家庭记忆",
+                "subtitle": speech,
+                "cards": [
+                    {
+                        "label": "记忆操作",
+                        "value": memory_action.get("summary") or speech,
+                        "tone": "warning",
+                    }
+                ],
+                "suggested_phrases": ["确认", "取消"],
+            }
+        )
+    else:
+        next_state["ui_patch"] = {}
     next_state = database.save_state(terminal_id, next_state, db_path=db_path)
     event = database.add_tool_event(
         terminal_id=terminal_id,
@@ -443,6 +557,8 @@ def handle_chat(
         return result
     if voice_route.intent == "start_vision":
         return _handle_start_vision(terminal_id, state, voice_route, resolved_db_path)
+    if _is_direct_recipe_request(request.text):
+        return _handle_direct_recipe_request(terminal_id, request, state, resolved_db_path)
 
     database.add_conversation(
         terminal_id,
@@ -499,6 +615,7 @@ def handle_chat(
         )
         agent_output = MockAgentProvider().chat_json(request.text, context)
 
+    agent_ui_patch = sanitize_ui_patch(agent_output.ui_patch)
     tool_names = _tool_names(agent_output)
 
     written_memories = []
@@ -552,6 +669,7 @@ def handle_chat(
             "recipe_documents": database.list_recipe_documents(terminal_id, db_path=resolved_db_path),
         }
         planned_recipe = recipe.plan_recipe(plan_context)
+        agent_ui_patch = build_planning_ui_patch(planned_recipe, plan_context, agent_ui_patch)
         next_state.update(
             {
                 "ui_mode": "planning",
@@ -561,6 +679,7 @@ def handle_chat(
                 "timer_status": "idle",
                 "timer_remaining_seconds": 0,
                 "active_adjustments": planned_recipe.get("adjustments", []),
+                "ui_patch": agent_ui_patch,
             }
         )
         events.append(
@@ -581,8 +700,13 @@ def handle_chat(
     if adjusted_for_memory or agent_output.recipe_adjustments:
         if state.get("ui_mode") == "cooking":
             next_state["ui_mode"] = "cooking"
+            next_state["ui_patch"] = build_cooking_ui_patch(next_state, agent_ui_patch)
         else:
             next_state["ui_mode"] = agent_output.ui_mode
+            if next_state.get("recipe"):
+                next_state["ui_patch"] = build_planning_ui_patch(next_state["recipe"], context, agent_ui_patch)
+            else:
+                next_state["ui_patch"] = agent_ui_patch
         events.append(
             _record_event(
                 terminal_id,
@@ -594,6 +718,8 @@ def handle_chat(
         )
     elif agent_output.intent != "plan_recipe":
         next_state["ui_mode"] = state.get("ui_mode", agent_output.ui_mode)
+        if agent_ui_patch:
+            next_state["ui_patch"] = agent_ui_patch
 
     next_state["last_speech"] = agent_output.speech
     next_state = database.save_state(terminal_id, next_state, db_path=resolved_db_path)
@@ -608,7 +734,7 @@ def handle_chat(
         "data": {
             "speech": agent_output.speech,
             "intent": agent_output.intent,
-            "ui_patch": agent_output.ui_patch,
+            "ui_patch": next_state.get("ui_patch") or agent_ui_patch,
             "provider": {
                 "mode": settings.demo_mode,
                 "name": provider.name,
@@ -714,6 +840,10 @@ def handle_vision(
     next_state = recipe.adjust_recipe_for_vision(state, observation)
     speech = _vision_speech(observation_dict)
     next_state["last_speech"] = speech
+    next_state["ui_patch"] = build_vision_ui_patch(
+        observation_dict,
+        next_state.get("active_adjustments") or [],
+    )
     next_state = database.save_state(terminal_id, next_state, db_path=resolved_db_path)
     events.append(
         _record_event(
@@ -735,6 +865,7 @@ def handle_vision(
         "data": {
             "observation": observation_dict,
             "speech": speech,
+            "ui_patch": next_state.get("ui_patch") or {},
             "provider": {
                 "mode": settings.demo_mode,
                 "name": provider.name,

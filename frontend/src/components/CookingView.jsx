@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { UiPatchAttention, UiPatchPhrases } from './UiPatch.jsx';
 
 function formatTimer(seconds) {
   const safe = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -42,6 +43,7 @@ export default function CookingView({ state, onControl, loading }) {
   const step = steps[idx] || null;
   const next = steps[idx + 1] || null;
   const adjustments = state?.active_adjustments || [];
+  const uiPatch = state?.ui_patch || {};
   const status = state?.timer_status || 'idle';
 
   const displayRemaining = useDisplayCountdown(state);
@@ -134,6 +136,9 @@ export default function CookingView({ state, onControl, loading }) {
                 ))}
               </div>
             ) : null}
+
+            <UiPatchAttention text={uiPatch.attention} />
+            <UiPatchPhrases phrases={uiPatch.suggested_phrases} />
           </>
         ) : (
           <div style={{ textAlign: 'center', color: 'var(--c-mid)' }}>

@@ -24,7 +24,7 @@ P3 DeepSeek-V4-Flash thinking
 
 Speech
   - 火山方舟 ASR
-  - 豆包 TTS 1.0
+  - 豆包 TTS 1.0 / 小米 MiMo TTS
 ```
 
 ## 七牛 MaaS
@@ -85,35 +85,62 @@ class ModelProvider:
 - 流式语音识别大模型。
 - 免费额度 20 小时。
 
-接入建议：
+主语音入口：
 
-- 后端连接火山 WebSocket。
-- 前端音频不直接发火山，避免暴露密钥。
-- 音频优先使用 16kHz、mono、pcm_s16le。
-- 分包建议 100-200ms，demo 可用 200ms。
+- 前端连接后端 `/ws/voice`，不直接连接火山，避免暴露密钥。
+- 前端采集 PCM16 16kHz mono 音频，按 100-200ms 分包发送 binary chunk。
+- 前端本地 VAD 检测到一次说话后的短暂停顿时，发送 `{"type":"audio.end"}`，
+  后端结束当前 ASR utterance 并触发 final 文本处理。
+- 后端 voice session 连接火山 WebSocket，转发 partial/final transcript。
+- ASR final 文本由后端进行“妮妮/腻妮/nini”软件唤醒和会话状态判断，再进入
+  `runtime.handle_chat`。
 
-首版可以先做两层：
+文件上传兜底：
 
-1. 非流式录音上传，快速验证闭环。
-2. 再升级为后端流式转发。
+- `/api/speech/asr` 继续接受 multipart 音频上传，仅作为调试和浏览器不支持流式采集时的兜底。
+- 主产品体验不再依赖“录完上传文件”。
 
 配置：
 
 ```env
+VOLC_ASR_WS_URL=wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
 VOLC_ASR_APP_KEY=
 VOLC_ASR_ACCESS_KEY=
-VOLC_ASR_RESOURCE_ID=
+VOLC_ASR_RESOURCE_ID=volc.bigasr.sauc.duration
 SPEECH_PROVIDER_MODE=mock
 SPEECH_TIMEOUT_SECONDS=30
+VOICE_WAKE_WORDS=妮妮,腻妮,nini
+VOICE_ACTIVE_IDLE_SECONDS=25
+VOICE_SLEEP_SECONDS=60
 ```
+
+本地后端启动时会自动读取仓库根目录 `.env`，但不会覆盖已经在 shell 中 export 的变量。
+修改 `.env` 后需要重启后端。调试真实 ASR 时，
+`/health` 应显示 `providers.speech_provider_mode=auto|real` 且
+`providers.volc_asr_configured=true`。
 
 当前实现：
 
-- `/api/speech/asr` 接受 multipart 音频上传。
+- `/ws/voice` 是主语音入口，协议事件包括 `session.state`、`asr.partial`、`asr.final`、
+  `wake.detected`、`agent.event` 和 `agent.response`。
+- 客户端除音频 binary chunk 外，还会发送 `session.start`、`audio.end`、`session.sleep`。
+- `/api/speech/asr` 仍接受 multipart 音频上传。
 - `SPEECH_PROVIDER_MODE=mock` 返回固定文本 `下一步`。
-- `SPEECH_PROVIDER_MODE=auto|real` 会进入 `VolcASRProvider` 边界；本阶段不做 WebSocket 流式 ASR，provider 返回明确 `not implemented` 类错误并 fallback mock。
+- `SPEECH_PROVIDER_MODE=auto|real` 优先进入 `VolcStreamingASRProvider`。缺少配置、连接失败或
+  provider 异常时降级到 `MockStreamingASRProvider`，WebSocket 不崩溃。
+- 火山流式 provider 使用推荐接口
+  `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async`，Header 为
+  `X-Api-App-Key`、`X-Api-Access-Key`、`X-Api-Resource-Id`、`X-Api-Connect-Id`。
+- 初始 request payload 使用 `audio.format=pcm`、`codec=raw`、`rate=16000`、`bits=16`、
+  `channel=1`，并开启 `request.enable_punc` 与 `request.enable_itn`。
 - provider 事件记录 `speech_asr`，不记录音频内容或 base64。
-- 完整流式 ASR 后续实现。
+- API key 不写入前端、事件或错误响应；provider 错误只保留脱敏摘要。
+
+隐私口径：
+
+- 休眠态和未授权状态不采集、不上传音频。
+- 待唤醒态只存在于用户显式开启 Web 语音会话之后，属于 demo 内软件唤醒，不是系统级离线唤醒。
+- 会话态仅上传前端 VAD 判断后的有效语音片段或少量静音边界包；超时后回到待唤醒或休眠。
 
 ## 豆包 TTS 1.0
 
@@ -162,6 +189,30 @@ SPEECH_TIMEOUT_SECONDS=30
 - `VOLC_TTS_ACCESS_TOKEN` 作为旧字段名兼容保留，推荐使用 `VOLC_TTS_ACCESS_KEY`。
 - provider 事件记录 `speech_tts`，只记录音频是否存在，不记录音频 base64。
 
+## Optional Xiaomi MiMo TTS
+
+小米 MiMo 只用于语音播报 TTS，不接入 ASR。ASR 主链路仍然是前端 `/ws/voice`
+流式会话加后端火山流式识别或 mock fallback。
+
+配置：
+
+```env
+SPEECH_TTS_VENDOR=bytedance
+MIMO_API_KEY=
+MIMO_BASE_URL=https://api.xiaomimimo.com/v1
+MIMO_TTS_MODEL=mimo-v2.5-tts
+MIMO_TTS_VOICE=茉莉
+MIMO_TTS_STYLE=温柔、清晰、像厨房里的智能助手，语速自然，提醒简洁。
+```
+
+当前实现：
+
+- `/api/speech/tts` 支持可选 `tts_vendor=bytedance|xiaomi|mock`，用于单次播报服务切换，不修改 `.env`。
+- 前端正式终端提供“语音播报：字节 / 小米”切换，自动播报和手动重播都会使用当前选择。
+- MiMo 请求使用 `POST {MIMO_BASE_URL}/chat/completions`，模型默认 `mimo-v2.5-tts`。
+- 合成文本放在 assistant message，风格提示放在 user message，音频格式为 wav。
+- MiMo 失败或未配置 `MIMO_API_KEY` 时 fallback 到 mock TTS；API key 不进入前端、事件或错误响应。
+
 ## DEMO_MODE
 
 ### mock
@@ -187,8 +238,16 @@ SPEECH_TIMEOUT_SECONDS=30
 启动后端：
 
 ```bash
-./.venv/bin/uvicorn backend.app:app --reload
+./.venv/bin/pip install -r backend/requirements.txt
+./.venv/bin/uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+注意：必须使用项目 `.venv` 里的 uvicorn。使用系统 Python 启动的旧进程可能没有
+`websockets` 依赖，也可能没有加载 `/ws/voice` 路由，浏览器会表现为
+`WebSocket connection ... /ws/voice failed`。
+如果本机 shell 配置了 SOCKS 代理，火山 WebSocket 连接还需要
+`python-socks[asyncio]`；该依赖已写入 `backend/requirements.txt`，更新后重新执行
+`./.venv/bin/pip install -r backend/requirements.txt`。
 
 mock demo：
 

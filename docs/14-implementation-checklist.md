@@ -13,7 +13,7 @@
 
 验收：
 
-- [ ] `uvicorn backend.app:app --reload` 可启动。
+- [ ] `./.venv/bin/uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload` 可启动。
 - [ ] `GET /health` 返回正常。
 
 ## 1. 数据库

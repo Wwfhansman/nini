@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from backend.agent.schemas import AgentOutput, VisionObservation
+from backend.agent.schemas import AgentOutput, VisionObservation, sanitize_ui_patch
 from backend.config import Settings, get_settings
 from backend.mocks.agent_responses import mock_agent_response
 from backend.mocks.vision_responses import mock_ingredient_observation
@@ -103,7 +103,7 @@ def normalize_agent_output_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     for list_field in ["tool_calls", "memory_writes", "inventory_patches", "recipe_adjustments"]:
         if normalized.get(list_field) is None:
             normalized[list_field] = []
-    normalized.setdefault("ui_patch", {})
+    normalized["ui_patch"] = sanitize_ui_patch(normalized.get("ui_patch"))
 
     memory_writes = []
     for raw_item in normalized.get("memory_writes") or []:

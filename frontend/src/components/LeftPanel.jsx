@@ -28,6 +28,10 @@ function VoiceBar({ voiceStatus }) {
   const label =
     {
       idle: '待命',
+      sleeping: '休眠',
+      listening_for_wake: '说“妮妮”唤醒',
+      active_listening: '我在听',
+      transcribing: '识别中…',
       listening: '正在听…',
       recording: '正在听…',
       requesting: '请求麦克风…',
@@ -39,9 +43,15 @@ function VoiceBar({ voiceStatus }) {
       denied: '麦克风未授权',
       error: '需要处理',
     }[voiceStatus] || '待命';
-  const active = ['listening', 'recording', 'recognizing', 'speaking'].includes(
-    voiceStatus,
-  );
+  const active = [
+    'listening',
+    'recording',
+    'listening_for_wake',
+    'active_listening',
+    'transcribing',
+    'recognizing',
+    'speaking',
+  ].includes(voiceStatus);
   return (
     <div className="voicebar">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -106,6 +116,10 @@ export default function LeftPanel({
   recorderError,
   recordingDurationMs,
   speechRecognitionHint,
+  partialTranscript,
+  finalTranscript,
+  ttsVendor,
+  onTtsVendorChange,
   onQuickAction,
 }) {
   const [input, setInput] = useState('');
@@ -113,9 +127,17 @@ export default function LeftPanel({
   const visible = messages.slice(-10);
   const voiceSecondaryDisabled =
     loading ||
-    ['requesting', 'recording', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
-      voiceStatus,
-    ) ||
+    [
+      'requesting',
+      'recording',
+      'listening_for_wake',
+      'active_listening',
+      'transcribing',
+      'stopping',
+      'recognizing',
+      'thinking',
+      'speaking',
+    ].includes(voiceStatus) ||
     ['requesting', 'recording', 'stopping'].includes(recordingState);
 
   useEffect(() => {
@@ -170,6 +192,10 @@ export default function LeftPanel({
         recorderError={recorderError}
         durationMs={recordingDurationMs}
         speechRecognitionHint={speechRecognitionHint}
+        partialTranscript={partialTranscript}
+        finalTranscript={finalTranscript}
+        ttsVendor={ttsVendor}
+        onTtsVendorChange={onTtsVendorChange}
         onVoicePrimary={onVoicePrimary}
         onPickAudio={onPickAudio}
         onPlayTts={onPlayTts}

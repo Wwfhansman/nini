@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, Query, UploadFile
+from fastapi import FastAPI, File, Form, Query, UploadFile, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -19,6 +19,7 @@ from backend.skills import memory, recipe_knowledge
 from backend.speech.providers import MockASRProvider, MockTTSProvider, get_asr_provider, get_tts_provider
 from backend.speech.schemas import SpeechProviderError, TTSRequest
 from backend.terminal import state as terminal_state
+from backend.voice.session import VoiceWebSocketSession
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -92,6 +93,33 @@ def _record_provider_log(
     )
 
 
+def _clean_tts_vendor(value: Optional[str], default: str = "bytedance") -> str:
+    vendor = (value or default or "bytedance").strip().lower()
+    if vendor not in {"bytedance", "xiaomi", "mock"}:
+        return default if default in {"bytedance", "xiaomi", "mock"} else "bytedance"
+    return vendor
+
+
+def _resolve_tts_vendor(requested: Optional[str], configured: str) -> str:
+    if requested and requested.strip():
+        return _clean_tts_vendor(requested, "bytedance")
+    return _clean_tts_vendor(configured, "bytedance")
+
+
+def _sanitize_speech_error(message: str, settings: Any) -> str:
+    sanitized = message or ""
+    for secret in (
+        settings.volc_tts_app_id,
+        settings.volc_tts_access_token,
+        settings.volc_asr_app_key,
+        settings.volc_asr_access_key,
+        settings.mimo_api_key,
+    ):
+        if secret:
+            sanitized = sanitized.replace(secret, "***")
+    return sanitized[:500]
+
+
 @app.get("/health")
 def health() -> dict:
     _init_runtime()
@@ -106,7 +134,9 @@ def health() -> dict:
             "vision_model_configured": bool(settings.model_vision),
             "base_url": settings.qiniu_base_url,
             "speech_provider_mode": settings.speech_provider_mode,
+            "tts_vendor": settings.speech_tts_vendor,
             "volc_tts_configured": settings.volc_tts_configured,
+            "mimo_tts_configured": settings.mimo_tts_configured,
             "volc_asr_configured": settings.volc_asr_configured,
             "tts_voice_type": settings.volc_tts_voice_type,
         },
@@ -220,7 +250,8 @@ def post_speech_tts(request: TTSRequest):
     if len(text) > 300:
         return _api_error(400, "invalid_request", "text must be 300 characters or fewer", state)
 
-    provider = get_tts_provider(settings)
+    requested_tts_vendor = _resolve_tts_vendor(request.tts_vendor, settings.speech_tts_vendor)
+    provider = get_tts_provider(settings, requested_tts_vendor)
     fallback_error: Optional[str] = None
     start_ms = time.perf_counter()
     try:
@@ -231,7 +262,7 @@ def post_speech_tts(request: TTSRequest):
             _record_provider_log(terminal_id, provider.name, provider.model, status, latency_ms)
     except SpeechProviderError as exc:
         latency_ms = int((time.perf_counter() - start_ms) * 1000)
-        fallback_error = str(exc)
+        fallback_error = _sanitize_speech_error(str(exc), settings)
         _record_provider_log(terminal_id, exc.provider, exc.model, "error", latency_ms, fallback_error)
         result = MockTTSProvider().synthesize(text, terminal_id)
         result.fallback_used = True
@@ -243,9 +274,10 @@ def post_speech_tts(request: TTSRequest):
         terminal_id=terminal_id,
         event_type="agent_tool",
         name="speech_tts",
-        input_json={"text_length": len(text), "voice_type": settings.volc_tts_voice_type},
+        input_json={"text_length": len(text), "requested_tts_vendor": requested_tts_vendor},
         output_json={
             "provider": result.provider,
+            "requested_tts_vendor": requested_tts_vendor,
             "attempted_provider": getattr(provider, "name", result.provider),
             "status": status,
             "latency_ms": latency_ms,
@@ -312,6 +344,12 @@ async def post_speech_asr(
         db_path=settings.db_path,
     )
     return ApiResponse(ok=True, data=result_dict, state=state, events=_public_events([event]), error=None)
+
+
+@app.websocket("/ws/voice")
+async def voice_websocket(websocket: WebSocket) -> None:
+    session = VoiceWebSocketSession(websocket)
+    await session.run()
 
 
 @app.get("/api/export/memory", response_class=PlainTextResponse)

@@ -66,7 +66,7 @@ def deduct_by_recipe(
 ) -> List[Dict[str, Any]]:
     existing = {item["name"]: item for item in list_inventory(terminal_id, db_path=db_path)}
     recipe_ingredients = {str(item) for item in recipe.get("ingredients", [])}
-    main_ingredients = [name for name in ["鸡胸肉", "番茄", "鸡蛋"] if name in recipe_ingredients]
+    main_ingredients = [name for name in ["鸡胸肉", "番茄", "鸡蛋", "牛肉"] if name in recipe_ingredients]
     deductions = []
     for name in main_ingredients:
         before = existing.get(name, {}).get("amount")

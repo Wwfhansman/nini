@@ -10,6 +10,7 @@ from pydantic import BaseModel
 class TTSRequest(BaseModel):
     terminal_id: Optional[str] = None
     text: str
+    tts_vendor: Optional[str] = None
 
 
 class TTSResult(BaseModel):
@@ -40,4 +41,3 @@ class SpeechProviderError(RuntimeError):
         self.provider = provider
         self.model = model
         self.status_code = status_code
-

@@ -49,20 +49,24 @@
 
 ## 本地运行
 
-安装依赖：
+安装后端依赖：
 
 ```bash
 python3 -m venv .venv
 ./.venv/bin/pip install -r backend/requirements.txt
 ```
 
-启动后端：
+启动后端（必须用项目虚拟环境，不要用系统 Python 的 `python -m uvicorn`）：
 
 ```bash
-./.venv/bin/uvicorn backend.app:app --reload
+./.venv/bin/uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 默认使用 `DEMO_MODE=mock`，不需要任何 API key，mock demo 始终应该可跑。
+`/ws/voice` 流式语音会话依赖 `websockets`；如果本机设置了 SOCKS 代理，`websockets`
+还需要 `python-socks[asyncio]`。这些依赖都已在 `backend/requirements.txt` 中声明。
+如果浏览器报 `WebSocket connection ... /ws/voice failed`，先确认后端是用上面的
+`.venv/bin/uvicorn` 命令启动，并且重启过后端。
 
 启动后可以访问临时测试控制台：
 
@@ -103,9 +107,10 @@ mock 语音不需要任何 key；配置真实 TTS 后，speech smoke 会要求 T
 ## 正式前端
 
 `frontend/` 是省赛演示用的厨房终端 UI（React + Vite，普通 CSS，零外部 CDN）。
-后端默认监听 `http://127.0.0.1:8000`，前端通过 `VITE_API_BASE_URL` 指向它。
+后端默认监听 `http://127.0.0.1:8000`。开发环境下，HTTP API 走 Vite proxy，
+语音 WebSocket 默认直连 `ws://127.0.0.1:8000/ws/voice`。
 
-安装依赖并启动开发服务器：
+另开一个终端安装并启动前端：
 
 ```bash
 cd frontend
@@ -122,7 +127,7 @@ npm run build
 npm run preview   # 可选，预览 dist/ 静态包
 ```
 
-默认配置下，Vite 把 `/api`、`/health`、`/test-console`、`/static` 反代到
+默认配置下，Vite 把 `/api`、`/ws`、`/health`、`/test-console`、`/static` 反代到
 `http://127.0.0.1:8000`，浏览器看到的是同源，无需在后端开 CORS。
 切换上游地址（例如 8000 端口被占）：
 
@@ -130,6 +135,7 @@ npm run preview   # 可选，预览 dist/ 静态包
 cd frontend
 cp .env.example .env
 # 修改 VITE_API_PROXY_TARGET=http://127.0.0.1:8001
+# 可选：修改 VITE_WS_BASE_URL=ws://127.0.0.1:8001
 ```
 
 如果要把构建产物部署到与后端不同源的地方，再用 `VITE_API_BASE_URL` 覆盖为绝对地址，
@@ -159,25 +165,38 @@ PROVIDER_TIMEOUT_SECONDS=30
 
 ## 火山语音配置
 
-本轮是语音接入第一阶段：TTS 优先真实接入，ASR 暂不做 WebSocket 流式，只提供上传接口、Volc provider 边界和 mock fallback。免费额度有限，`speech` 字段应保持短句。
+语音主入口是 `/ws/voice` 流式会话：前端采集 PCM16 16k mono 音频发给后端，
+后端再接火山流式 ASR 或 mock streaming fallback。`/api/speech/asr` 文件上传接口仍保留为调试兜底。
+免费额度有限，`speech` 字段应保持短句。
+后端本地启动时会自动读取仓库根目录 `.env`，不会覆盖 shell 里已经 export 的变量；修改 `.env`
+后需要重启后端。
 
 ```env
 SPEECH_PROVIDER_MODE=mock
 SPEECH_TIMEOUT_SECONDS=30
+VOLC_ASR_WS_URL=wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
+VOLC_ASR_RESOURCE_ID=volc.bigasr.sauc.duration
+VOLC_ASR_APP_KEY=
+VOLC_ASR_ACCESS_KEY=
 VOLC_TTS_APP_ID=
 VOLC_TTS_ACCESS_KEY=
 VOLC_TTS_ACCESS_TOKEN=
 VOLC_TTS_RESOURCE_ID=seed-tts-1.0
 VOLC_TTS_VOICE_TYPE=zh_female_wanwanxiaohe_moon_bigtts
-VOLC_ASR_APP_KEY=
-VOLC_ASR_ACCESS_KEY=
-VOLC_ASR_RESOURCE_ID=
+SPEECH_TTS_VENDOR=bytedance
+MIMO_API_KEY=
+MIMO_TTS_MODEL=mimo-v2.5-tts
+MIMO_TTS_VOICE=茉莉
 ```
 
 - `SPEECH_PROVIDER_MODE=mock`：TTS/ASR 都使用 mock，不需要 key。
-- `SPEECH_PROVIDER_MODE=auto|real`：TTS 走火山 V3 `/api/v3/tts/unidirectional`，失败时返回 mock fallback；ASR 当前返回明确占位错误并 fallback mock。
+- `SPEECH_PROVIDER_MODE=auto|real`：TTS 走火山 V3 `/api/v3/tts/unidirectional`；ASR 优先走火山流式 WebSocket，失败时 fallback mock。
+- 如果前端显示“语音识别：演示模式”，先看 `/health` 里的 `providers.speech_provider_mode`
+  是否为 `auto` 或 `real`，以及 `providers.volc_asr_configured` 是否为 `true`。
 - `VOLC_TTS_ACCESS_KEY` 是火山文档里的 Access Key；如果你已经填了旧字段名 `VOLC_TTS_ACCESS_TOKEN`，后端也会兼容读取。
 - `VOLC_TTS_RESOURCE_ID` 默认 `seed-tts-1.0`。如果控制台给你的资源 ID 是 `volc.service_type.10029`，就按控制台实际值覆盖。
+- 小米 MiMo 只用于 TTS，不接小米 ASR；ASR 仍走上面的 `/ws/voice` 流式识别链路。
+- 正式前端可切换“语音播报：字节 / 小米”。选择小米时，后端用 `MIMO_API_KEY` 调用 MiMo TTS；未配置或失败会 fallback mock。
 - `/api/speech/tts` 限制 300 字以内，避免浪费 TTS 额度。
 - 密钥只在后端读取，不会暴露给 `/test-console`。
 
@@ -187,7 +206,7 @@ VOLC_ASR_RESOURCE_ID=
   - 快速对话与视觉：Doubao-Seed 1.6 Flash。
   - 任务 Agent 与复杂决策：DeepSeek-V4-Flash。
 - ASR：火山方舟大模型流式语音识别。
-- TTS：豆包语音合成大模型 1.0。
+- TTS：豆包语音合成大模型 1.0，前端可选小米 MiMo TTS。
   - 音色 ID：`zh_female_wanwanxiaohe_moon_bigtts`。
 
 ## 关键原则

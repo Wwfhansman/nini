@@ -1,4 +1,5 @@
 import React from 'react';
+import { UiPatchAttention, UiPatchCards, UiPatchPhrases } from './UiPatch.jsx';
 
 function memoryText(m) {
   const v = m?.value_json;
@@ -9,7 +10,8 @@ function memoryText(m) {
 
 export default function PlanningView({ state, memories, inventory, onControl, loading }) {
   const recipe = state?.recipe || null;
-  const dishName = state?.dish_name || recipe?.dish_name || '尚未生成菜品';
+  const uiPatch = state?.ui_patch || {};
+  const dishName = uiPatch.title || state?.dish_name || recipe?.dish_name || '尚未生成菜品';
   const servings = recipe?.servings || '—';
   const minutes = recipe?.estimated_minutes;
   const ingredients = recipe?.ingredients || [];
@@ -44,6 +46,11 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
       <div className="feature-block">
         <div className="feature-left">
           <div className="recipe-name">{dishName}</div>
+          {uiPatch.subtitle ? (
+            <div className="patch-subtitle">{uiPatch.subtitle}</div>
+          ) : null}
+          <UiPatchAttention text={uiPatch.attention} />
+          <UiPatchCards cards={uiPatch.cards} />
           <div className="recipe-meta">
             {Number.isFinite(minutes) ? (
               <span className="meta-item">⏱ {minutes} 分钟</span>
@@ -65,6 +72,7 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
             </div>
           ) : null}
           <div className="reason-text">{reasoning}</div>
+          <UiPatchPhrases phrases={uiPatch.suggested_phrases} />
 
           <div className="plan-actions">
             <button

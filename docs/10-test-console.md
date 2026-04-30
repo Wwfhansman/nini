@@ -36,6 +36,10 @@ backend/static/test-console.html
 
 启动后端后访问：
 
+```bash
+./.venv/bin/uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+```
+
 ```text
 http://127.0.0.1:8000/test-console
 ```

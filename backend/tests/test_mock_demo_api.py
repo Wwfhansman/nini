@@ -55,6 +55,41 @@ def test_chat_initial_plan_writes_memory_inventory_and_planning_state(tmp_path, 
     )
 
 
+def test_direct_recipe_request_uses_local_planner_without_search_hang(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "妮妮，教我做红烧牛肉", "source": "voice_session"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["intent"] == "plan_recipe"
+    assert payload["data"]["provider"]["name"] == "local_recipe_planner"
+    assert payload["state"]["dish_name"] == "红烧牛肉"
+    assert payload["state"]["recipe"]["steps"][0]["title"] == "牛肉切块焯水"
+    assert [event["name"] for event in payload["events"]] == ["recipe_plan"]
+
+
+def test_unsupported_direct_recipe_request_uses_agent_provider(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "妮妮，教我做宫保鸡丁", "source": "voice_session"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["provider"]["name"] == "mock_agent"
+    assert payload["data"]["intent"] == "small_reply"
+    assert payload["state"]["recipe"] is None
+    assert "recipe_plan" not in [event["name"] for event in payload["events"]]
+
+
 def test_vision_returns_mock_observation_and_adjusts_recipe(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _reset(client)

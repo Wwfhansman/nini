@@ -4,3 +4,5 @@ pydantic
 pytest
 httpx
 python-multipart
+websockets
+python-socks[asyncio]

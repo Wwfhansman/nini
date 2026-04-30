@@ -183,6 +183,39 @@ def test_qiniu_chat_normalizes_common_memory_aliases(tmp_path, monkeypatch):
     assert "妈妈不吃辣" in export.text
 
 
+def test_provider_normalizes_missing_and_malformed_ui_patch():
+    missing = normalize_agent_output_payload(
+        {
+            "intent": "small_reply",
+            "ui_mode": "planning",
+            "speech": "继续。",
+            "tool_calls": [],
+            "memory_writes": [],
+            "inventory_patches": [],
+            "recipe_adjustments": [],
+        }
+    )
+    assert missing["ui_patch"] == {}
+
+    malformed = normalize_agent_output_payload(
+        {
+            "intent": "small_reply",
+            "ui_mode": "planning",
+            "speech": "继续。",
+            "ui_patch": {
+                "cards": [{"label": "异常", "value": "内容", "tone": "not-a-tone"}],
+                "suggested_phrases": ["a", "b", "c", "d", "e", "f"],
+            },
+            "tool_calls": [],
+            "memory_writes": [],
+            "inventory_patches": [],
+            "recipe_adjustments": [],
+        }
+    )
+    assert malformed["ui_patch"]["cards"][0]["tone"] == "neutral"
+    assert len(malformed["ui_patch"]["suggested_phrases"]) == 5
+
+
 def test_plan_recipe_uses_current_text_when_provider_skips_memory_writes(tmp_path, monkeypatch):
     client = _client(
         tmp_path,

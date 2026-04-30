@@ -6,6 +6,10 @@ export default function SpeechControls({
   recorderError,
   durationMs,
   speechRecognitionHint,
+  partialTranscript,
+  finalTranscript,
+  ttsVendor,
+  onTtsVendorChange,
   onVoicePrimary,
   onPickAudio,
   onPlayTts,
@@ -13,6 +17,10 @@ export default function SpeechControls({
 }) {
   const statusText = {
     idle: '待命',
+    sleeping: '休眠',
+    listening_for_wake: '待唤醒',
+    active_listening: '我在听',
+    transcribing: '识别中',
     requesting: '请求麦克风',
     recording: '正在听',
     stopping: '收尾中',
@@ -25,35 +33,52 @@ export default function SpeechControls({
   }[voiceStatus] || '待命';
 
   const primaryLabel = {
-    idle: '开始说话',
+    idle: '开启语音会话',
+    sleeping: '开启语音会话',
+    listening_for_wake: '休眠',
+    active_listening: '休眠',
+    transcribing: '休眠',
     requesting: '请求麦克风…',
     recording: '停止并识别',
     stopping: '处理中…',
     recognizing: '识别中…',
-    thinking: '理解中…',
-    speaking: '播报中…',
+    thinking: '休眠',
+    speaking: '休眠',
     unsupported: '无法录音',
     denied: '麦克风未授权',
     error: '重新开始',
   }[voiceStatus] || '开始说话';
 
   const durationText =
-    recordingState === 'recording' || voiceStatus === 'recording'
+    recordingState === 'recording' ||
+    ['recording', 'listening_for_wake', 'active_listening', 'transcribing'].includes(
+      voiceStatus,
+    )
       ? `${Math.max(1, Math.round(durationMs / 1000))}s`
       : null;
   const primaryDisabled =
     ['unsupported', 'denied'].includes(recordingState) ||
     ['unsupported', 'denied'].includes(voiceStatus) ||
-    (loading && voiceStatus !== 'recording') ||
-    ['requesting', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
-      voiceStatus,
-    );
+    voiceStatus === 'requesting';
   const secondaryDisabled =
     loading ||
-    ['requesting', 'recording', 'stopping', 'recognizing', 'thinking', 'speaking'].includes(
-      voiceStatus,
-    ) ||
+    [
+      'requesting',
+      'recording',
+      'listening_for_wake',
+      'active_listening',
+      'transcribing',
+      'stopping',
+      'recognizing',
+      'thinking',
+      'speaking',
+    ].includes(voiceStatus) ||
     ['requesting', 'recording', 'stopping'].includes(recordingState);
+  const transcriptHint = partialTranscript
+    ? `正在识别：${partialTranscript}`
+    : finalTranscript
+      ? `刚才听到：${finalTranscript}`
+      : '';
 
   return (
     <div className="speech-controls">
@@ -61,13 +86,37 @@ export default function SpeechControls({
         <span className="speech-status">{statusText}</span>
         <span className="speech-help">
           {recorderError ||
+            transcriptHint ||
             speechRecognitionHint ||
-            '点击开始说话，妮妮会听完、理解并回复。'}
+            "开启后说“妮妮”唤醒，连续说话即可。"}
         </span>
+      </div>
+      <div className="tts-vendor-switch" aria-label="语音播报服务">
+        <span>语音播报：</span>
+        <button
+          type="button"
+          className={ttsVendor === 'bytedance' ? 'active' : ''}
+          onClick={() => onTtsVendorChange?.('bytedance')}
+        >
+          字节
+        </button>
+        <button
+          type="button"
+          className={ttsVendor === 'xiaomi' ? 'active' : ''}
+          onClick={() => onTtsVendorChange?.('xiaomi')}
+        >
+          小米
+        </button>
       </div>
       <button
         type="button"
-        className={`speech-main ${voiceStatus === 'recording' ? 'recording' : ''}`}
+        className={`speech-main ${
+          ['recording', 'listening_for_wake', 'active_listening', 'transcribing'].includes(
+            voiceStatus,
+          )
+            ? 'recording'
+            : ''
+        }`}
         onClick={onVoicePrimary}
         disabled={primaryDisabled}
       >

@@ -142,6 +142,39 @@ def test_finish_preserves_inventory_metadata_when_marking_used(tmp_path, monkeyp
     assert egg_item["freshness"] == "新鲜"
 
 
+def test_finish_braised_beef_deducts_beef_inventory(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    db_path = str(tmp_path / "nini-test.db")
+    client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "妮妮，教我做红烧牛肉", "source": "voice_session"},
+    )
+    database.upsert_inventory_item(
+        terminal_id="demo-kitchen-001",
+        name="牛肉",
+        amount="500g",
+        unit="g",
+        category="肉类",
+        freshness="冷藏",
+        source="test",
+        db_path=db_path,
+    )
+    client.post("/api/control", json={"terminal_id": "demo-kitchen-001", "command": "start"})
+
+    response = client.post("/api/control", json={"terminal_id": "demo-kitchen-001", "command": "finish"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    beef_change = next(item for item in payload["state"]["review"]["inventory_changes"] if item["name"] == "牛肉")
+    assert beef_change["before"] == "500g"
+    assert beef_change["after"] == "已使用500g"
+    assert beef_change["unit"] == "g"
+    assert beef_change["freshness"] == "冷藏"
+    state_payload = client.get("/api/state?terminal_id=demo-kitchen-001").json()["data"]
+    beef_item = next(item for item in state_payload["inventory"] if item["name"] == "牛肉")
+    assert beef_item["amount"] == "已使用500g"
+
+
 def test_repeated_finish_does_not_emit_duplicate_review_events(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _plan(client)

@@ -2,6 +2,10 @@ import React from 'react';
 
 const VOICE_LABELS = {
   idle: { text: '待命', tone: 'mid' },
+  sleeping: { text: '休眠', tone: 'mid' },
+  listening_for_wake: { text: '待唤醒', tone: 'terra' },
+  active_listening: { text: '我在听', tone: 'terra' },
+  transcribing: { text: '识别中', tone: 'saffron' },
   listening: { text: '正在听', tone: 'terra' },
   recording: { text: '正在听', tone: 'terra' },
   requesting: { text: '请求中', tone: 'terra' },

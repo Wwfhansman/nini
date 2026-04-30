@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 
 TRAILING_PUNCTUATION = "。！？!?.,，；;：:、 "
-WAKE_WORDS = ("妮妮厨房", "妮妮")
+WAKE_WORDS = ("妮妮厨房", "妮妮", "腻妮", "nini")
 
 
 @dataclass(frozen=True)

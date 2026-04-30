@@ -26,11 +26,92 @@ MemoryType = Literal[
     "allergy_or_restriction",
     "cooking_note",
 ]
+UiPatchTone = Literal["neutral", "health", "restrict", "preference", "warning", "success"]
+
+UI_PATCH_LIMITS = {
+    "title": 60,
+    "subtitle": 120,
+    "attention": 120,
+    "label": 20,
+    "value": 80,
+    "phrase": 30,
+}
+UI_PATCH_TONES = {"neutral", "health", "restrict", "preference", "warning", "success"}
 
 
 class ErrorPayload(BaseModel):
     code: str
     message: str
+
+
+class UiPatchCard(BaseModel):
+    label: str
+    value: str
+    tone: UiPatchTone = "neutral"
+
+
+class UiPatch(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    attention: Optional[str] = None
+    cards: List[UiPatchCard] = Field(default_factory=list)
+    suggested_phrases: List[str] = Field(default_factory=list)
+
+
+def _clip_text(value: Any, max_length: int) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rstrip()
+
+
+def sanitize_ui_patch(value: Any) -> Dict[str, Any]:
+    """Return a bounded, render-safe ui_patch dictionary."""
+
+    if isinstance(value, UiPatch):
+        if hasattr(value, "model_dump"):
+            value = value.model_dump()
+        else:
+            value = value.dict()
+    if not isinstance(value, dict):
+        return {}
+
+    patch: Dict[str, Any] = {}
+    for field in ("title", "subtitle", "attention"):
+        text = _clip_text(value.get(field), UI_PATCH_LIMITS[field])
+        if text:
+            patch[field] = text
+
+    cards: List[Dict[str, Any]] = []
+    for raw_card in value.get("cards") or []:
+        if not isinstance(raw_card, dict):
+            continue
+        label = _clip_text(raw_card.get("label"), UI_PATCH_LIMITS["label"])
+        card_value = _clip_text(raw_card.get("value"), UI_PATCH_LIMITS["value"])
+        if not label and not card_value:
+            continue
+        tone = str(raw_card.get("tone") or "neutral").strip()
+        if tone not in UI_PATCH_TONES:
+            tone = "neutral"
+        cards.append({"label": label, "value": card_value, "tone": tone})
+        if len(cards) >= 6:
+            break
+    if cards:
+        patch["cards"] = cards
+
+    phrases = []
+    for raw_phrase in value.get("suggested_phrases") or []:
+        phrase = _clip_text(raw_phrase, UI_PATCH_LIMITS["phrase"])
+        if phrase:
+            phrases.append(phrase)
+        if len(phrases) >= 5:
+            break
+    if phrases:
+        patch["suggested_phrases"] = phrases
+
+    return patch
 
 
 class CookingStep(BaseModel):
@@ -65,6 +146,7 @@ class TerminalStateSnapshot(BaseModel):
     timer_remaining_seconds: int = 0
     active_adjustments: List[str] = Field(default_factory=list)
     last_speech: str = ""
+    ui_patch: Dict[str, Any] = Field(default_factory=dict)
     pending_action: Optional[Dict[str, Any]] = None
     updated_at: Optional[str] = None
 

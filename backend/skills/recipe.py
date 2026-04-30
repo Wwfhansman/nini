@@ -81,6 +81,64 @@ def base_recipe_plan() -> Dict[str, Any]:
     return _model_to_dict(recipe)
 
 
+def braised_beef_recipe_plan() -> Dict[str, Any]:
+    steps = [
+        CookingStep(
+            index=0,
+            title="牛肉切块焯水",
+            instruction="牛腩或牛肉切大块，冷水下锅，加入姜片，煮开后撇去浮沫并捞出。",
+            ingredients=["牛肉", "姜"],
+            heat="大火",
+            duration_seconds=360,
+            tips=["焯水能去血沫，后面汤汁更干净。"],
+        ),
+        CookingStep(
+            index=1,
+            title="炒香料和牛肉",
+            instruction="锅里放少量油，加入姜、葱和八角炒香，再放牛肉翻炒到表面收紧。",
+            ingredients=["牛肉", "姜", "葱", "八角", "少量油"],
+            heat="中火",
+            duration_seconds=180,
+        ),
+        CookingStep(
+            index=2,
+            title="加入红烧调味",
+            instruction="加入生抽、老抽和少量冰糖翻匀，让牛肉均匀上色。",
+            ingredients=["生抽", "老抽", "冰糖"],
+            heat="中小火",
+            duration_seconds=120,
+            tips=["老抽少量即可，颜色够了就停。"],
+        ),
+        CookingStep(
+            index=3,
+            title="加热水炖煮",
+            instruction="加入没过牛肉的热水，煮开后转小火炖到牛肉软烂。",
+            ingredients=["热水", "牛肉"],
+            heat="小火",
+            duration_seconds=3600,
+            tips=["如果用高压锅，可压 25 到 30 分钟。"],
+        ),
+        CookingStep(
+            index=4,
+            title="收汁调味",
+            instruction="牛肉软烂后开盖收汁，根据咸淡补少量盐，汤汁浓稠后出锅。",
+            ingredients=["盐"],
+            heat="中火",
+            duration_seconds=300,
+        ),
+    ]
+    recipe = RecipePlan(
+        dish_name="红烧牛肉",
+        servings="2-3人份",
+        estimated_minutes=70,
+        reasoning_summary="按家常红烧做法规划，先焯水去腥，再小火炖到软烂。",
+        ingredients=["牛肉", "姜", "葱", "八角", "生抽", "老抽", "冰糖", "盐", "少量油"],
+        steps=steps,
+        adjustments=[],
+    )
+    return _model_to_dict(recipe)
+
+
 def _value_text(item: Dict[str, Any]) -> str:
     value = item.get("value_json")
     if isinstance(value, dict):
@@ -101,6 +159,11 @@ def _context_text(context: Optional[Dict[str, Any]]) -> str:
     return " ".join(parts)
 
 
+def supports_direct_recipe_request(text: str) -> bool:
+    normalized = "".join(str(text or "").split())
+    return "红烧牛肉" in normalized
+
+
 def _inventory_map(context: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return {
         str(item.get("name")): item
@@ -118,8 +181,8 @@ def _recipe_documents_match(context: Optional[Dict[str, Any]]) -> bool:
 
 
 def plan_recipe(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    recipe = base_recipe_plan()
     text = _context_text(context)
+    recipe = braised_beef_recipe_plan() if supports_direct_recipe_request(text) else base_recipe_plan()
     inventory = _inventory_map(context)
     reasons = []
     name_prefixes: List[str] = []
@@ -146,7 +209,7 @@ def plan_recipe(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         reasons.append("参考已导入的家庭菜谱做法")
 
     if inventory:
-        required = ["鸡胸肉", "番茄", "鸡蛋"]
+        required = ["牛肉"] if recipe.get("dish_name") == "红烧牛肉" else ["鸡胸肉", "番茄", "鸡蛋"]
         missing = [name for name in required if name not in inventory]
         if missing:
             recipe["ingredients"].extend([f"待确认：{name}" for name in missing])

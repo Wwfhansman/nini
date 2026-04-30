@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from backend import database
 from backend.agent.schemas import CookingStep, RecipePlan, TerminalStateSnapshot
+from backend.agent.ui_patch import build_cooking_ui_patch, build_review_ui_patch
 from backend.skills import inventory as inventory_skill
 from backend.skills import memory as memory_skill
 from backend.skills import recipe as recipe_skill
@@ -92,6 +93,7 @@ def default_state(terminal_id: str) -> Dict[str, Any]:
         timer_remaining_seconds=0,
         active_adjustments=[],
         last_speech="告诉我今晚想吃什么，或者让我看看食材。",
+        ui_patch={},
     )
     return _model_to_dict(snapshot)
 
@@ -136,6 +138,7 @@ def start_cooking(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, 
     state["timer_status"] = "running"
     state["timer_remaining_seconds"] = _current_step_duration(state)
     state["last_speech"] = f"开始做这道{state.get('dish_name') or '菜'}。"
+    state["ui_patch"] = build_cooking_ui_patch(state)
     return database.save_state(terminal_id, state, db_path=db_path)
 
 
@@ -154,6 +157,7 @@ def next_step(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]
     state["timer_status"] = "running"
     state["timer_remaining_seconds"] = _current_step_duration(state)
     state["last_speech"] = "进入下一步。"
+    state["ui_patch"] = build_cooking_ui_patch(state)
     return database.save_state(terminal_id, state, db_path=db_path)
 
 
@@ -171,6 +175,7 @@ def previous_step(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, 
     state["timer_status"] = "running"
     state["timer_remaining_seconds"] = _current_step_duration(state)
     state["last_speech"] = "回到上一步。"
+    state["ui_patch"] = build_cooking_ui_patch(state)
     return database.save_state(terminal_id, state, db_path=db_path)
 
 
@@ -179,6 +184,7 @@ def pause_timer(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, An
     if state.get("ui_mode") == "cooking" and state.get("timer_status") == "running":
         state["timer_status"] = "paused"
         state["last_speech"] = "已暂停。"
+        state["ui_patch"] = build_cooking_ui_patch(state)
     else:
         state["last_speech"] = "当前没有正在运行的烹饪计时。"
     return database.save_state(terminal_id, state, db_path=db_path)
@@ -191,13 +197,18 @@ def resume_timer(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, A
         if int(state.get("timer_remaining_seconds", 0) or 0) <= 0:
             state["timer_remaining_seconds"] = _current_step_duration(state)
         state["last_speech"] = "继续。"
+        state["ui_patch"] = build_cooking_ui_patch(state)
     else:
         state["last_speech"] = "当前没有已暂停的烹饪计时。"
     return database.save_state(terminal_id, state, db_path=db_path)
 
 
 def repeat_current_step(terminal_id: str, db_path: Optional[str] = None) -> Dict[str, Any]:
-    return get_state(terminal_id, db_path=db_path)
+    state = get_state(terminal_id, db_path=db_path)
+    if state.get("recipe"):
+        state["ui_patch"] = build_cooking_ui_patch(state)
+        return database.save_state(terminal_id, state, db_path=db_path)
+    return state
 
 
 def current_step_speech(state: Dict[str, Any]) -> str:
@@ -233,6 +244,10 @@ def finish_cooking(terminal_id: str, db_path: Optional[str] = None) -> Dict[str,
             state,
             memory_skill.list_memories(terminal_id, db_path=db_path),
             inventory_changes,
+        )
+        state["ui_patch"] = build_review_ui_patch(
+            state,
+            memory_skill.list_memories(terminal_id, db_path=db_path),
         )
         state["review_generated"] = True
     state["last_speech"] = "已完成，进入复盘。"

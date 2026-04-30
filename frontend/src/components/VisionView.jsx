@@ -1,4 +1,5 @@
 import React from 'react';
+import { UiPatchAttention, UiPatchCards, UiPatchPhrases } from './UiPatch.jsx';
 
 export default function VisionView({
   state,
@@ -10,6 +11,7 @@ export default function VisionView({
   recentEvents,
 }) {
   const recipe = state?.recipe;
+  const uiPatch = state?.ui_patch || {};
   const adjustments = state?.active_adjustments || [];
   const ingredients = lastObservation?.ingredients || [];
   const notes = lastObservation?.notes || [];
@@ -35,7 +37,8 @@ export default function VisionView({
     <div className="view-wrap">
       <div className="view-header">
         <div className="view-eyebrow saffron">终端视觉</div>
-        <div className="view-title">我正在查看台面上的食材</div>
+        <div className="view-title">{uiPatch.title || '我正在查看台面上的食材'}</div>
+        {uiPatch.subtitle ? <div className="patch-subtitle">{uiPatch.subtitle}</div> : null}
       </div>
 
       <div className="vision-layout">
@@ -74,6 +77,10 @@ export default function VisionView({
         </div>
 
         <div className="vision-right">
+          <UiPatchAttention text={uiPatch.attention} />
+          <UiPatchCards cards={uiPatch.cards} />
+          <UiPatchPhrases phrases={uiPatch.suggested_phrases} />
+
           <div className="info-block">
             <div className="info-title">看到的食材</div>
             {observationIngredients.length === 0 ? (
