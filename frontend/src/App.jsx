@@ -16,9 +16,9 @@ import CenterPanel from './components/CenterPanel.jsx';
 import RightPanel from './components/RightPanel.jsx';
 import useVoiceSession from './hooks/useVoiceSession.js';
 
-const DEMO_PLAN_TEXT =
+const EXPERIENCE_PLAN_TEXT =
   '我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？';
-const DEMO_SOUR_TEXT = '记住我不喜欢太酸';
+const EXPERIENCE_SOUR_TEXT = '记住我不喜欢太酸';
 const AUTO_PLAYBACK_TIMEOUT_MS = 16000;
 
 const nowTime = () =>
@@ -50,10 +50,10 @@ function toAudioFile(blob) {
   });
 }
 
-function createDemoIngredientsFile() {
+function createStarterIngredientsFile() {
   return new File(
-    [new Blob(['nini demo ingredients'], { type: 'image/jpeg' })],
-    'demo-ingredients.jpg',
+    [new Blob(['nini kitchen ingredients'], { type: 'image/jpeg' })],
+    'kitchen-ingredients.jpg',
     { type: 'image/jpeg' },
   );
 }
@@ -95,7 +95,7 @@ function playbackNotice(result, manual = false) {
   if (result?.reason === 'blocked') {
     return manual
       ? '浏览器未能播放音频，请稍后再试。'
-      : '浏览器未自动播放，可点击重播。';
+      : '浏览器未自动播放，可点“再说一遍”。';
   }
   if (result?.reason === 'playback_error') {
     return '语音音频暂时无法播放，已保留文字回复。';
@@ -106,11 +106,29 @@ function playbackNotice(result, manual = false) {
   return '当前暂无可播放语音，已保留文字回复。';
 }
 
-function serviceModeLabel(mode) {
-  const normalized = (mode || 'mock').toLowerCase();
-  if (normalized === 'real') return '在线模式';
-  if (normalized === 'hybrid') return '混合模式';
-  return '演示模式';
+function effectiveUiModeForState(snapshot) {
+  const mode = snapshot?.ui_mode || 'planning';
+  if (mode === 'review' || mode === 'vision' || mode === 'cooking') return mode;
+
+  const steps = snapshot?.recipe?.steps || [];
+  if (!steps.length) return mode;
+
+  const stepIndex = Number(snapshot?.current_step_index || 0);
+  const timerStatus = snapshot?.timer_status || 'idle';
+  const patchText = [
+    snapshot?.ui_patch?.title,
+    snapshot?.ui_patch?.subtitle,
+    snapshot?.ui_patch?.attention,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const patchLooksLikeStep = /步骤\s*\d+\s*\/\s*\d+|当前步骤|下一步/.test(patchText);
+
+  if (timerStatus === 'finished' && snapshot?.review) return 'review';
+  if (['running', 'paused'].includes(timerStatus) || (stepIndex > 0 && timerStatus !== 'idle') || patchLooksLikeStep) {
+    return 'cooking';
+  }
+  return mode;
 }
 
 export default function App() {
@@ -132,8 +150,8 @@ export default function App() {
   const [recentEvents, setRecentEvents] = useState([]);
 
   const [memoryMarkdown, setMemoryMarkdown] = useState('');
-  const [demoRunning, setDemoRunning] = useState(false);
-  const [demoStep, setDemoStep] = useState('');
+  const [experienceRunning, setExperienceRunning] = useState(false);
+  const [experienceStep, setExperienceStep] = useState('');
 
   const [pendingImage, setPendingImage] = useState(null);
   const [lastVisionPreview, setLastVisionPreview] = useState(null);
@@ -158,7 +176,7 @@ export default function App() {
         const h = await getHealth();
         if (!cancelled) setHealth(h);
       } catch (e) {
-        if (!cancelled) setError(`暂时无法连接厨房服务: ${e.message}`);
+        if (!cancelled) setError(`厨房终端暂时连接不上: ${e.message}`);
       }
     })();
     return () => {
@@ -176,7 +194,7 @@ export default function App() {
         if (data.state) setState(data.state);
         if (Array.isArray(data.tool_events)) setRecentEvents([]);
       } catch (e) {
-        setError(`获取状态失败: ${e.message}`);
+        setError(`厨房终端状态暂时无法更新: ${e.message}`);
       }
     },
     [terminalId],
@@ -239,7 +257,7 @@ export default function App() {
       setApiData(data);
       if (data.state) setState(data.state);
     } catch (e) {
-      setError(`刷新状态失败: ${e.message}`);
+      setError(`厨房终端状态暂时无法刷新: ${e.message}`);
     }
   }, [terminalId]);
 
@@ -342,11 +360,11 @@ export default function App() {
           asrResp?.data?.provider === 'mock_asr' ||
           asrResp?.data?.fallback_used
         ) {
-          setNotice('当前为演示识别，系统会使用固定指令：下一步。');
+          setNotice('刚才没有完全听清，我先按识别到的指令继续。');
         }
         const text = (asrResp?.data?.text || '').trim();
         if (!text) {
-          setError('没有识别到有效语音，请再说一次或上传录音。');
+          setError('没有听到有效内容，请再说一次或选择语音文件。');
           setVoiceStatus('idle');
           return;
         }
@@ -358,7 +376,7 @@ export default function App() {
         await syncFullState();
         await speakResponseSpeech(chatResp, `${source}-tts`);
       } catch (e) {
-        setError(`语音会话失败: ${e.message}`);
+        setError(`语音会话暂时不可用: ${e.message}`);
         setVoiceStatus('idle');
       } finally {
         setLoading(false);
@@ -394,7 +412,7 @@ export default function App() {
           setVoiceStatus('idle');
         }
       } catch (e) {
-        setError(`发送失败: ${e.message}`);
+        setError(`妮妮暂时没有接住这句话: ${e.message}`);
         setVoiceStatus('idle');
         if (options.throwOnError) throw e;
       } finally {
@@ -413,7 +431,7 @@ export default function App() {
         applyResponse(resp, { source: 'control' });
         await syncFullState();
       } catch (e) {
-        setError(`控制 ${command} 失败: ${e.message}`);
+        setError(`这个操作暂时没有完成: ${e.message}`);
         if (options.throwOnError) throw e;
       } finally {
         setLoading(false);
@@ -426,8 +444,8 @@ export default function App() {
     async (file, options = {}) => {
       const f = file || pendingImage;
       if (!f) {
-        setError('请先选择一张食材画面');
-        if (options.throwOnError) throw new Error('请先选择一张食材画面');
+        setError('请先选择一张台面照片');
+        if (options.throwOnError) throw new Error('请先选择一张台面照片');
         return;
       }
       setError(null);
@@ -439,7 +457,7 @@ export default function App() {
         applyResponse(resp, { source: 'vision' });
         await syncFullState();
       } catch (e) {
-        setError(`视觉识别失败: ${e.message}`);
+        setError(`刚才没有看清食材: ${e.message}`);
         if (options.throwOnError) throw e;
       } finally {
         setLoading(false);
@@ -516,7 +534,7 @@ export default function App() {
       const playback = await requestSpeechPlayback(last.text, 'tts');
       if (!playback.played) setNotice(playbackNotice(playback, true));
     } catch (e) {
-      setError(`语音播报失败: ${e.message}`);
+      setError(`暂时不能播报这句话: ${e.message}`);
     } finally {
       setVoiceStatus('idle');
     }
@@ -528,39 +546,39 @@ export default function App() {
       const md = await getMemoryMarkdown(terminalId);
       setMemoryMarkdown(md);
     } catch (e) {
-      setError(`导出记忆失败: ${e.message}`);
+      setError(`家庭记忆卡暂时无法生成: ${e.message}`);
       if (options.throwOnError) throw e;
     }
   }, [terminalId]);
 
-  const runDemoFlow = useCallback(async () => {
-    if (demoRunning) return;
-    setDemoRunning(true);
+  const runGuidedFlow = useCallback(async () => {
+    if (experienceRunning) return;
+    setExperienceRunning(true);
     setError(null);
     setMemoryMarkdown('');
     setChatLog([]);
     setRecentEvents([]);
     const step = async (label, fn, gap = 600) => {
-      setDemoStep(label);
+      setExperienceStep(label);
       try {
         await fn();
       } catch (e) {
-        setError(`演示步骤「${label}」失败: ${e.message}`);
+        setError(`当前步骤「${label}」没有完成: ${e.message}`);
         throw e;
       }
       await sleep(gap);
     };
     try {
-      await step('重置终端', () => sendControl('reset', { throwOnError: true }));
+      await step('准备厨房终端', () => sendControl('reset', { throwOnError: true }));
       await step(
         '规划晚餐',
-        () => sendChat(DEMO_PLAN_TEXT, { throwOnError: true, autoSpeak: false }),
+        () => sendChat(EXPERIENCE_PLAN_TEXT, { throwOnError: true, autoSpeak: false }),
         800,
       );
       await step(
         '查看食材',
         () =>
-          sendVision(pendingImage || createDemoIngredientsFile(), {
+          sendVision(pendingImage || createStarterIngredientsFile(), {
             throwOnError: true,
           }),
         800,
@@ -568,7 +586,7 @@ export default function App() {
       await step('开始烹饪', () => sendControl('start', { throwOnError: true }));
       await step(
         '记住口味',
-        () => sendChat(DEMO_SOUR_TEXT, { throwOnError: true, autoSpeak: false }),
+        () => sendChat(EXPERIENCE_SOUR_TEXT, { throwOnError: true, autoSpeak: false }),
         800,
       );
       await step('进入下一步', () => sendControl('next_step', { throwOnError: true }));
@@ -576,25 +594,15 @@ export default function App() {
       await step('继续', () => sendControl('resume', { throwOnError: true }));
       await step('完成复盘', () => sendControl('finish', { throwOnError: true }));
       await step('导出家庭记忆', () => exportMemory({ throwOnError: true }));
-      setDemoStep('完成');
+      setExperienceStep('完成');
     } catch {
-      setDemoStep('需要处理');
+      setExperienceStep('需要继续处理');
     } finally {
-      setDemoRunning(false);
+      setExperienceRunning(false);
     }
-  }, [demoRunning, sendControl, sendChat, sendVision, exportMemory, pendingImage]);
-
-  const mode = useMemo(() => {
-    return serviceModeLabel(health?.demo_mode);
-  }, [health]);
+  }, [experienceRunning, sendControl, sendChat, sendVision, exportMemory, pendingImage]);
 
   const speechRecognitionHint = useMemo(() => {
-    const providers = health?.providers || {};
-    const modeValue = providers.speech_provider_mode;
-    if (modeValue === 'mock') return '语音识别：演示模式，会返回固定指令';
-    if (['real', 'auto'].includes(modeValue)) {
-      return '语音识别：当前暂用演示兜底';
-    }
     return '';
   }, [health]);
 
@@ -615,6 +623,7 @@ export default function App() {
     }
     return dedup;
   }, [toolEventsServer, recentEvents]);
+  const effectiveUiMode = useMemo(() => effectiveUiModeForState(state), [state]);
 
   const recorderError = voiceSession.error;
   const recordingDurationMs = voiceSession.durationMs;
@@ -629,14 +638,11 @@ export default function App() {
   return (
     <div className="app-root">
       <TopBar
-        appState={state.ui_mode || 'planning'}
+        appState={effectiveUiMode}
         currentStepIndex={state.current_step_index}
         totalSteps={state.recipe?.steps?.length}
         voiceStatus={voiceDisplayStatus}
         currentTime={currentTime}
-        mode={mode}
-        terminalId={terminalId}
-        onTerminalIdChange={setTerminalId}
       />
 
       {error ? (
@@ -656,34 +662,34 @@ export default function App() {
         </div>
       ) : null}
 
-      <div className="demo-bar">
-        <span className="label">演示</span>
+      <div className="experience-bar">
+        <span className="label">今日</span>
         <button
           type="button"
-          className="demo-btn"
-          disabled={demoRunning}
-          onClick={runDemoFlow}
+          className="experience-btn"
+          disabled={experienceRunning}
+          onClick={runGuidedFlow}
         >
-          {demoRunning ? '运行中…' : '一键演示'}
+          {experienceRunning ? '安排中…' : '开始体验'}
         </button>
         <button
           type="button"
-          className="demo-btn secondary"
-          disabled={demoRunning || loading}
+          className="experience-btn secondary"
+          disabled={experienceRunning || loading}
           onClick={triggerImagePicker}
         >
-          {pendingImage ? '已选择食材画面' : '选择食材画面（可选）'}
+          {pendingImage ? '已选台面照片' : '看看食材'}
         </button>
         <button
           type="button"
-          className="demo-btn secondary"
-          disabled={demoRunning || loading}
+          className="experience-btn secondary"
+          disabled={experienceRunning || loading}
           onClick={() => sendControl('reset')}
         >
-          重置
+          重新开始
         </button>
-        {demoStep ? (
-          <span className="demo-step">进度：{demoStep}</span>
+        {experienceStep ? (
+          <span className="experience-step">正在：{experienceStep}</span>
         ) : null}
       </div>
 
@@ -692,7 +698,7 @@ export default function App() {
           <LeftPanel
             messages={chatLog}
             voiceStatus={voiceDisplayStatus}
-            uiMode={state.ui_mode || 'planning'}
+            uiMode={effectiveUiMode}
             loading={loading}
             onSend={sendChat}
             onVoicePrimary={handleVoicePrimary}
@@ -716,7 +722,7 @@ export default function App() {
         </div>
         <div className="app-col center">
           <CenterPanel
-            uiMode={state.ui_mode || 'planning'}
+            uiMode={effectiveUiMode}
             state={state}
             memories={memories}
             inventory={inventory}
@@ -735,7 +741,7 @@ export default function App() {
         </div>
         <div className="app-col right">
           <RightPanel
-            uiMode={state.ui_mode || 'planning'}
+            uiMode={effectiveUiMode}
             events={combinedEvents}
             memories={memories}
             state={state}

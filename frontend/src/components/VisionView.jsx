@@ -25,6 +25,11 @@ export default function VisionView({
     : null;
   const observationIngredients = observation?.ingredients || [];
   const observationNotes = observation?.notes || notes;
+  const visibleIngredients = observationIngredients.slice(0, 4);
+  const hiddenIngredientCount = Math.max(0, observationIngredients.length - visibleIngredients.length);
+  const visibleNotes = (observationNotes || []).slice(0, 2);
+  const patchCards = uiPatch.cards || [];
+  const hasPatchCards = patchCards.length > 0;
 
   const beforeLines = recipe?.servings
     ? [`计划 ${recipe.servings}`, `计划用料 ${recipe?.ingredients?.length ?? 0} 项`]
@@ -36,7 +41,7 @@ export default function VisionView({
   return (
     <div className="view-wrap">
       <div className="view-header">
-        <div className="view-eyebrow saffron">终端视觉</div>
+        <div className="view-eyebrow saffron">台面观察</div>
         <div className="view-title">{uiPatch.title || '我正在查看台面上的食材'}</div>
         {uiPatch.subtitle ? <div className="patch-subtitle">{uiPatch.subtitle}</div> : null}
       </div>
@@ -54,7 +59,7 @@ export default function VisionView({
             )}
           </div>
           <div className="cam-label">
-            Web 演示中使用图片模拟终端摄像头画面
+            把食材放到镜头前，或选择一张台面照片。
           </div>
           <div className="vision-upload">
             <button
@@ -63,7 +68,7 @@ export default function VisionView({
               onClick={onPickImage}
               disabled={loading}
             >
-              选择一张食材画面
+              选择照片
             </button>
             <button
               type="button"
@@ -71,44 +76,49 @@ export default function VisionView({
               onClick={onUploadVision}
               disabled={loading || !visionPreview}
             >
-              {loading ? '识别中…' : '开始识别'}
+              {loading ? '正在看…' : '看看食材'}
             </button>
           </div>
         </div>
 
         <div className="vision-right">
           <UiPatchAttention text={uiPatch.attention} />
-          <UiPatchCards cards={uiPatch.cards} />
+          <UiPatchCards cards={patchCards} />
           <UiPatchPhrases phrases={uiPatch.suggested_phrases} />
 
-          <div className="info-block">
-            <div className="info-title">看到的食材</div>
-            {observationIngredients.length === 0 ? (
-              <div className="mem-empty">请先选择食材画面，妮妮会根据看到的食材调整方案</div>
-            ) : (
-              observationIngredients.map((it) => {
-                const warn =
-                  String(it.amount || '').includes('半') ||
-                  String(it.amount || '').includes('少');
-                return (
-                  <div className="info-row" key={`${it.name}-${it.amount}`}>
-                    <span className="info-key">{it.name}</span>
-                    <span className={`info-val ${warn ? 'warn' : 'ok'}`}>
-                      {it.amount}
-                      {Number.isFinite(it.confidence)
-                        ? ` · ${(it.confidence * 100).toFixed(0)}%`
-                        : ''}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {observationNotes?.length ? (
+          {!hasPatchCards ? (
             <div className="info-block">
+              <div className="info-title">看到的食材</div>
+              {observationIngredients.length === 0 ? (
+                <div className="mem-empty">请先选择食材画面，妮妮会根据看到的食材调整方案</div>
+              ) : (
+                visibleIngredients.map((it) => {
+                  const warn =
+                    String(it.amount || '').includes('半') ||
+                    String(it.amount || '').includes('少');
+                  return (
+                    <div className="info-row" key={`${it.name}-${it.amount}`}>
+                      <span className="info-key">{it.name}</span>
+                      <span className={`info-val ${warn ? 'warn' : 'ok'}`}>
+                        {it.amount}
+                        {Number.isFinite(it.confidence)
+                          ? ` · ${(it.confidence * 100).toFixed(0)}%`
+                          : ''}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+              {hiddenIngredientCount ? (
+                <div className="mem-empty">还有 {hiddenIngredientCount} 项已放入当前库存</div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {visibleNotes.length ? (
+            <div className="info-block compact">
               <div className="info-title">观察备注</div>
-              {observationNotes.map((n, i) => (
+              {visibleNotes.map((n, i) => (
                 <div className="mem-row" key={i}>
                   <span className="dash">—</span>
                   <span>{n}</span>
@@ -117,27 +127,36 @@ export default function VisionView({
             </div>
           ) : null}
 
-          <div className="info-block">
-            <div className="info-title">对菜谱的影响</div>
-            <div className="ba-grid">
-              <div>
-                <div className="ba-col-title">原计划</div>
-                {beforeLines.map((t, i) => (
-                  <div className="ba-line before" key={i}>
-                    {t}
-                  </div>
-                ))}
+          <div className={`info-block ${hasPatchCards ? 'compact' : ''}`}>
+            <div className="info-title">{hasPatchCards ? '菜谱调整' : '对菜谱的影响'}</div>
+            {hasPatchCards ? (
+              afterLines.slice(0, 2).map((t, i) => (
+                <div className="mem-row" key={i}>
+                  <span className="dash">✦</span>
+                  <span>{t}</span>
+                </div>
+              ))
+            ) : (
+              <div className="ba-grid">
+                <div>
+                  <div className="ba-col-title">原计划</div>
+                  {beforeLines.map((t, i) => (
+                    <div className="ba-line before" key={i}>
+                      {t}
+                    </div>
+                  ))}
+                </div>
+                <div className="ba-arrow">→</div>
+                <div>
+                  <div className="ba-col-title after">已根据食材调整</div>
+                  {afterLines.slice(0, 3).map((t, i) => (
+                    <div className="ba-line after" key={i}>
+                      {t}
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="ba-arrow">→</div>
-              <div>
-                <div className="ba-col-title after">已根据食材调整</div>
-                {afterLines.map((t, i) => (
-                  <div className="ba-line after" key={i}>
-                    {t}
-                  </div>
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

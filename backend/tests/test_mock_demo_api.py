@@ -55,6 +55,36 @@ def test_chat_initial_plan_writes_memory_inventory_and_planning_state(tmp_path, 
     )
 
 
+def test_chat_plan_and_start_teaching_enters_cooking_state(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "terminal_id": "demo-kitchen-001",
+            "text": f"{PLAN_TEXT} 然后开始教我做。",
+            "source": "text",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["intent"] == "plan_recipe"
+    assert payload["state"]["ui_mode"] == "cooking"
+    assert payload["state"]["timer_status"] == "running"
+    assert payload["state"]["current_step_index"] == 0
+    assert payload["state"]["ui_patch"]["title"] == payload["state"]["recipe"]["steps"][0]["title"]
+    assert [event["name"] for event in payload["events"]] == [
+        "memory_write",
+        "inventory_update",
+        "recipe_plan",
+        "start",
+    ]
+    assert payload["events"][-1]["event_type"] == "local_control"
+    assert payload["events"][-1]["output"]["model_called"] is False
+
+
 def test_direct_recipe_request_uses_local_planner_without_search_hang(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _reset(client)
@@ -71,6 +101,71 @@ def test_direct_recipe_request_uses_local_planner_without_search_hang(tmp_path, 
     assert payload["state"]["dish_name"] == "红烧牛肉"
     assert payload["state"]["recipe"]["steps"][0]["title"] == "牛肉切块焯水"
     assert [event["name"] for event in payload["events"]] == ["recipe_plan"]
+
+
+def test_generic_recipe_request_uses_local_planner(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+
+    response = client.post(
+        "/api/chat",
+        json={"terminal_id": "demo-kitchen-001", "text": "妮妮，给我做个菜", "source": "voice_session"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["intent"] == "plan_recipe"
+    assert payload["data"]["provider"]["name"] == "local_recipe_planner"
+    assert payload["state"]["ui_mode"] == "planning"
+    assert payload["state"]["recipe"]["steps"][0]["title"] == "鸡胸肉切薄片并轻腌"
+    assert payload["state"]["ui_patch"]["title"] == payload["state"]["dish_name"]
+    assert [event["name"] for event in payload["events"]] == ["recipe_plan"]
+
+
+def test_generic_recipe_request_with_start_teaching_enters_cooking(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "terminal_id": "demo-kitchen-001",
+            "text": "妮妮，给我做个菜，然后开始教我做",
+            "source": "voice_session",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["intent"] == "plan_recipe"
+    assert payload["state"]["ui_mode"] == "cooking"
+    assert payload["state"]["timer_status"] == "running"
+    assert payload["state"]["ui_patch"]["title"] == payload["state"]["recipe"]["steps"][0]["title"]
+    assert [event["name"] for event in payload["events"]] == ["recipe_plan", "start"]
+
+
+def test_recipe_request_with_start_teaching_enters_cooking(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _reset(client)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "terminal_id": "demo-kitchen-001",
+            "text": "妮妮，推荐红烧牛肉，然后开始教我做",
+            "source": "voice_session",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["intent"] == "plan_recipe"
+    assert payload["state"]["ui_mode"] == "cooking"
+    assert payload["state"]["timer_status"] == "running"
+    assert payload["state"]["recipe"]["steps"][0]["title"] == "牛肉切块焯水"
+    assert [event["name"] for event in payload["events"]] == ["recipe_plan", "start"]
+    assert payload["events"][1]["event_type"] == "local_control"
+    assert payload["events"][1]["output"]["model_called"] is False
 
 
 def test_unsupported_direct_recipe_request_uses_agent_provider(tmp_path, monkeypatch):

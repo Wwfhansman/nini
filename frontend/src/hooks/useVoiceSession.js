@@ -69,6 +69,17 @@ function concatSamples(current, next) {
   return merged;
 }
 
+function voiceNotice(message) {
+  if (!message) return '语音会话暂时不可用。';
+  if (message.includes('已切换')) {
+    return '语音连接不稳定，已切换为备用识别。';
+  }
+  if (message.includes('上传') || message.includes('录音')) {
+    return '语音暂时不可用，请选择语音文件。';
+  }
+  return message;
+}
+
 export default function useVoiceSession({ terminalId, onAgentEvent, onAgentResponse, onError }) {
   const supportedRef = useRef(isSupported());
   const wsRef = useRef(null);
@@ -323,8 +334,8 @@ export default function useVoiceSession({ terminalId, onAgentEvent, onAgentRespo
         return;
       }
       if (payload.type === 'error') {
-        const message = payload.message || '语音会话暂时不可用。';
-        if (message.includes('已切换演示模式')) {
+        const message = voiceNotice(payload.message);
+        if (payload.message?.includes('已切换')) {
           setError(null);
           setFallbackUsed(true);
         } else {
@@ -338,7 +349,7 @@ export default function useVoiceSession({ terminalId, onAgentEvent, onAgentRespo
 
   const startSession = useCallback(async () => {
     if (!supportedRef.current) {
-      const message = '当前浏览器不支持流式语音会话，请使用上传录音兜底。';
+      const message = '当前浏览器不支持实时语音，请选择语音文件。';
       setError(message);
       setSessionState('unsupported');
       onError?.(message);
@@ -389,7 +400,7 @@ export default function useVoiceSession({ terminalId, onAgentEvent, onAgentRespo
         err?.name === 'PermissionDeniedError' ||
         err?.name === 'SecurityError';
       const message = denied
-        ? '麦克风权限被拒绝，请使用上传录音兜底。'
+        ? '麦克风权限被拒绝，请选择语音文件。'
         : err.message || '语音会话启动失败。';
       setError(message);
       setSessionState(denied ? 'denied' : 'error');
@@ -408,7 +419,7 @@ export default function useVoiceSession({ terminalId, onAgentEvent, onAgentRespo
 
   const isActive = !['sleeping', 'unsupported', 'denied', 'error'].includes(sessionState);
   const recognitionMode =
-    provider === 'mock_streaming_asr' || fallbackUsed ? '语音识别：演示模式' : '';
+    provider === 'mock_streaming_asr' || fallbackUsed ? '语音已准备好' : '';
 
   return {
     sessionState,

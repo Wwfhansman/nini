@@ -94,6 +94,18 @@ VISION_COMMANDS = {
 MEMORY_CONFIRM_COMMANDS = {"确认", "可以", "对", "删掉", "是的"}
 MEMORY_CANCEL_COMMANDS = {"取消", "算了", "不用了", "先别删"}
 RECENT_MEMORY_DELETE_COMMANDS = {"刚才那个记错了", "这个记错了", "刚才记错了"}
+START_COOKING_TEXT_TOKENS = (
+    "开始教我做",
+    "开始带我做",
+    "带我做这道",
+    "带我做",
+    "一步一步教我",
+    "按步骤教我",
+    "跟着做",
+    "进入步骤",
+    "打开步骤",
+    "开始步骤",
+)
 
 
 def normalize_voice_text(text: str) -> str:
@@ -166,6 +178,30 @@ def _is_memory_delete_request(normalized_text: str) -> bool:
     return False
 
 
+def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in text for token in tokens)
+
+
+def _is_short_command(text: str, tokens: tuple[str, ...], max_len: int = 6) -> bool:
+    """Match tokens only when the text is short (likely a command) or starts with the token."""
+    for token in tokens:
+        if text.startswith(token):
+            return True
+        if len(text) <= max_len and token in text:
+            return True
+    return False
+
+
+def _has_recipe(state: Optional[Dict[str, Any]]) -> bool:
+    recipe = (state or {}).get("recipe") or {}
+    return bool(recipe.get("steps"))
+
+
+def wants_start_cooking_text(text: str) -> bool:
+    normalized = normalize_voice_text(text)
+    return _contains_any(normalized, START_COOKING_TEXT_TOKENS)
+
+
 def route_voice_text(text: str, state: Optional[Dict[str, Any]] = None) -> VoiceRouteResult:
     """Route only high-confidence voice commands to the local P0 state machine."""
 
@@ -174,6 +210,7 @@ def route_voice_text(text: str, state: Optional[Dict[str, Any]] = None) -> Voice
         return _agent_route(normalized, "empty_text")
 
     ui_mode = (state or {}).get("ui_mode", "planning")
+    has_recipe = _has_recipe(state)
     if normalized in MEMORY_CONFIRM_COMMANDS:
         return _memory_action_route("memory_delete_confirm", normalized, "memory_delete_confirmation")
     if normalized in MEMORY_CANCEL_COMMANDS:
@@ -182,14 +219,63 @@ def route_voice_text(text: str, state: Optional[Dict[str, Any]] = None) -> Voice
         return _memory_action_route("memory_delete_request", normalized, "memory_delete_request")
     if normalized in VISION_COMMANDS:
         return _frontend_action_route("start_vision", normalized, "vision_capture_request")
+    if _contains_any(
+        normalized,
+        (
+            "看看食材",
+            "看下食材",
+            "看一下食材",
+            "看看台面",
+            "看下台面",
+            "看一下台面",
+            "台面上有什么",
+            "我现在有什么菜",
+            "现在有什么食材",
+            "识别食材",
+        ),
+    ):
+        return _frontend_action_route("start_vision", normalized, "vision_capture_request")
+
     if ui_mode == "cooking" and normalized in COOKING_NEXT_COMMANDS:
         return _control_route(COOKING_NEXT_COMMANDS[normalized], normalized, "cooking_step_progress")
     if ui_mode == "cooking" and normalized in COOKING_REPEAT_COMMANDS:
         return _control_route(COOKING_REPEAT_COMMANDS[normalized], normalized, "cooking_repeat_step")
+    if ui_mode == "cooking":
+        if _contains_any(normalized, ("再说一遍", "重复一下", "这一步怎么做", "这步怎么做", "当前步骤怎么做")):
+            return _control_route("repeat_current_step", normalized, "cooking_repeat_step", confidence=0.94)
+        if _contains_any(normalized, ("下一步", "继续下一步", "然后呢", "接下来", "这步好了", "这一步好了", "我做好了")):
+            return _control_route("next_step", normalized, "cooking_step_progress", confidence=0.94)
+        if _is_short_command(normalized, ("暂停", "等一下", "停一下", "先等下", "先等等")):
+            return _control_route("pause", normalized, "cooking_pause_request", confidence=0.94)
+        if _is_short_command(normalized, ("继续", "我回来了", "接着做")):
+            return _control_route("resume", normalized, "cooking_resume_request", confidence=0.94)
+        if _is_short_command(normalized, ("做完了", "完成了", "做好了", "结束本次")):
+            return _control_route("finish", normalized, "cooking_finish_request", confidence=0.94)
+
     if ui_mode == "planning" and normalized in PLANNING_START_COMMANDS:
         return _control_route(PLANNING_START_COMMANDS[normalized], normalized, "planning_start_confirmation")
+    if ui_mode == "planning" and has_recipe and _contains_any(
+        normalized,
+        (
+            "开始做",
+            "开始吧",
+            "开始烹饪",
+            "就做",
+            "做这个",
+            "做这道",
+            "按这个",
+            "按这道",
+            "可以开始",
+            *START_COOKING_TEXT_TOKENS,
+        ),
+    ):
+        return _control_route("start", normalized, "planning_start_confirmation", confidence=0.94)
+
     if ui_mode == "review" and normalized in REVIEW_RESET_COMMANDS:
         return _control_route(REVIEW_RESET_COMMANDS[normalized], normalized, "review_reset_request")
+    if ui_mode == "review" and _contains_any(normalized, ("重新规划", "重新来", "再做一道", "换一道")):
+        return _control_route("reset", normalized, "review_reset_request", confidence=0.94)
+
     if normalized in GLOBAL_COMMANDS:
         return _control_route(GLOBAL_COMMANDS[normalized], normalized, "exact_p0_command")
 

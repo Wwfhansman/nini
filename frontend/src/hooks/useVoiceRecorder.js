@@ -76,7 +76,7 @@ export default function useVoiceRecorder() {
   const startRecording = useCallback(async () => {
     if (!supportedRef.current) {
       setRecordingState('unsupported');
-      setError('当前浏览器不支持录音，请使用音频上传兜底。');
+      setError('当前浏览器不支持录音，请选择语音文件。');
       return false;
     }
     if (recordingState === 'recording' || recordingState === 'requesting') {
@@ -105,7 +105,7 @@ export default function useVoiceRecorder() {
         if (event.data?.size > 0) chunksRef.current.push(event.data);
       };
       recorder.onerror = () => {
-        setError('录音过程中出现错误，请重试或上传录音。');
+        setError('录音过程中出现错误，请重试或选择语音文件。');
       };
       recorder.onstop = () => {
         clearDurationTimer();
@@ -140,7 +140,7 @@ export default function useVoiceRecorder() {
         err?.name === 'PermissionDeniedError' ||
         err?.name === 'SecurityError';
       setRecordingState(denied ? 'denied' : 'idle');
-      setError(denied ? '麦克风权限被拒绝，请使用上传录音兜底。' : err.message);
+      setError(denied ? '麦克风权限被拒绝，请选择语音文件。' : err.message);
       return false;
     }
   }, [clearDurationTimer, recordingState]);

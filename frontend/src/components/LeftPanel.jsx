@@ -31,12 +31,12 @@ function VoiceBar({ voiceStatus }) {
       sleeping: '休眠',
       listening_for_wake: '说“妮妮”唤醒',
       active_listening: '我在听',
-      transcribing: '识别中…',
+      transcribing: '听懂中…',
       listening: '正在听…',
       recording: '正在听…',
-      requesting: '请求麦克风…',
+      requesting: '准备麦克风…',
       stopping: '收尾中…',
-      recognizing: '识别中…',
+      recognizing: '听懂中…',
       thinking: '理解中…',
       speaking: '播报中',
       unsupported: '浏览器不支持录音',
@@ -162,7 +162,7 @@ export default function LeftPanel({
       <div className="chat-list" ref={listRef}>
         {visible.length === 0 ? (
           <div className="chat-empty">
-            说说今晚想吃什么，或者点击上方「一键演示」。
+            说说今晚想吃什么，或者从「今日推荐」开始。
           </div>
         ) : (
           visible.map((msg) => (
@@ -223,7 +223,7 @@ export default function LeftPanel({
             type="button"
             className="icon-btn"
             onClick={onPickAudio}
-            title="上传录音"
+            title="选择语音文件"
             aria-label="upload audio"
             disabled={voiceSecondaryDisabled}
           >
@@ -266,7 +266,7 @@ export default function LeftPanel({
             type="button"
             className="icon-btn"
             onClick={onPlayTts}
-            title="重播回复"
+            title="再说一遍"
             aria-label="play tts"
             disabled={voiceSecondaryDisabled}
           >
@@ -308,14 +308,14 @@ export default function LeftPanel({
           className="quick-btn primary"
           onClick={() => onQuickAction('cooking')}
         >
-          开始烹饪
+          开始做
         </button>
         <button
           type="button"
           className="quick-btn"
           onClick={() => onQuickAction('review')}
         >
-          烹饪复盘
+          查看复盘
         </button>
       </div>
     </div>

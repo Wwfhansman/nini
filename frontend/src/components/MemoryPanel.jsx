@@ -17,7 +17,7 @@ const TYPE_LABELS = {
 const SOURCE_LABELS = {
   user_explicit: '用户告诉我',
   inferred: '妮妮推断',
-  vision: '视觉识别',
+  vision: '看食材',
   review: '烹饪复盘',
 };
 

@@ -8,10 +8,19 @@ function memoryText(m) {
   return v.text || v.value || JSON.stringify(v);
 }
 
+function isTransientRecipeTitle(text) {
+  const compact = String(text || '').replace(/\s/g, '');
+  if (!compact) return false;
+  return /加载菜谱|生成菜谱|菜谱加载|菜谱生成|正在.*菜谱/.test(compact);
+}
+
 export default function PlanningView({ state, memories, inventory, onControl, loading }) {
   const recipe = state?.recipe || null;
   const uiPatch = state?.ui_patch || {};
-  const dishName = uiPatch.title || state?.dish_name || recipe?.dish_name || '尚未生成菜品';
+  const hasRecipe = Boolean(recipe?.steps?.length);
+  const patchTitle = !hasRecipe && isTransientRecipeTitle(uiPatch.title) ? '' : uiPatch.title;
+  const patchSubtitle = !hasRecipe && isTransientRecipeTitle(uiPatch.subtitle) ? '' : uiPatch.subtitle;
+  const dishName = patchTitle || state?.dish_name || recipe?.dish_name || '还没有晚餐方案';
   const servings = recipe?.servings || '—';
   const minutes = recipe?.estimated_minutes;
   const ingredients = recipe?.ingredients || [];
@@ -38,16 +47,14 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
   return (
     <div className="view-wrap">
       <div className="view-header">
-        <div className="view-eyebrow">
-          妮妮推荐方案 · 基于家庭记忆与当前库存生成
-        </div>
+        <div className="view-eyebrow">今晚这道菜 · 结合家人口味和现有食材</div>
       </div>
 
       <div className="feature-block">
         <div className="feature-left">
           <div className="recipe-name">{dishName}</div>
-          {uiPatch.subtitle ? (
-            <div className="patch-subtitle">{uiPatch.subtitle}</div>
+          {patchSubtitle ? (
+            <div className="patch-subtitle">{patchSubtitle}</div>
           ) : null}
           <UiPatchAttention text={uiPatch.attention} />
           <UiPatchCards cards={uiPatch.cards} />
@@ -78,10 +85,10 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
             <button
               type="button"
               className="btn-primary"
-              disabled={loading}
+              disabled={loading || !hasRecipe}
               onClick={() => onControl('start')}
             >
-              开始做这道
+              {hasRecipe ? '开始做这道' : '先规划晚餐'}
             </button>
             <button
               type="button"
@@ -90,14 +97,14 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
               onClick={() => onControl('reset')}
               title="重新规划一道菜"
             >
-              换一道
+              重新规划
             </button>
           </div>
         </div>
 
         <div className="feature-right">
           <div className="info-block">
-            <div className="info-title">食材匹配</div>
+            <div className="info-title">食材准备</div>
             {ingredients.length === 0 ? (
               <div className="mem-empty">尚无食材清单</div>
             ) : (
@@ -118,7 +125,7 @@ export default function PlanningView({ state, memories, inventory, onControl, lo
           </div>
 
           <div className="info-block">
-            <div className="info-title">家庭记忆命中</div>
+            <div className="info-title">家人口味</div>
             {memories.length === 0 ? (
               <div className="mem-empty">暂无家庭记忆，先在左侧输入约束</div>
             ) : (

@@ -61,6 +61,22 @@ def test_cooking_hao_le_routes_to_next_step(tmp_path, monkeypatch):
     assert payload["state"]["current_step_index"] == 1
 
 
+def test_natural_cooking_next_step_routes_to_local_control(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _control(client, "reset")
+    _plan(client)
+    _control(client, "start")
+
+    response = _chat(client, "妮妮，这一好了，下一步呢？")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["model_called"] is False
+    assert payload["data"]["voice_route"]["command"] == "next_step"
+    assert payload["state"]["ui_mode"] == "cooking"
+    assert payload["state"]["current_step_index"] == 1
+
+
 def test_voice_pause_and_resume_update_timer_status(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
@@ -128,6 +144,47 @@ def test_planning_hao_le_starts_cooking(tmp_path, monkeypatch):
     assert payload["state"]["ui_mode"] == "cooking"
 
 
+def test_natural_planning_start_routes_to_local_control(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _control(client, "reset")
+    _plan(client)
+
+    response = _chat(client, "那我们就开始做这道吧")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["model_called"] is False
+    assert payload["data"]["voice_route"]["command"] == "start"
+    assert payload["state"]["ui_mode"] == "cooking"
+
+
+def test_planning_start_teaching_routes_to_cooking_template(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _control(client, "reset")
+    _plan(client)
+
+    response = _chat(client, "妮妮，开始教我做")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["model_called"] is False
+    assert payload["data"]["voice_route"]["command"] == "start"
+    assert payload["state"]["ui_mode"] == "cooking"
+    assert payload["state"]["timer_status"] == "running"
+
+
+def test_natural_start_without_recipe_stays_on_agent_path(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _control(client, "reset")
+
+    response = _chat(client, "今天开始做什么比较好")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "voice_route" not in payload["data"]
+    assert not any(event["event_type"] == "local_control" for event in payload["events"])
+
+
 def test_repeat_prompt_in_planning_stays_on_agent_path(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     _control(client, "reset")
@@ -175,6 +232,19 @@ def test_vision_voice_request_enters_vision_without_provider(tmp_path, monkeypat
     assert payload["events"][0]["output"]["model_called"] is False
     assert "镜头前" in payload["data"]["speech"]
     assert not any(event["name"] == "provider_call" for event in payload["events"])
+
+
+def test_natural_vision_request_enters_vision_without_provider(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _control(client, "reset")
+
+    response = _chat(client, "你看下我台面上有什么食材")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"]["ui_mode"] == "vision"
+    assert payload["data"]["model_called"] is False
+    assert payload["data"]["voice_route"]["intent"] == "start_vision"
 
 
 def test_complex_voice_request_stays_on_agent_path(tmp_path, monkeypatch):

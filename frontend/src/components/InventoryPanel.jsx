@@ -1,46 +1,15 @@
 import React from 'react';
 
-function modeLabel(mode) {
-  const value = (mode || 'mock').toLowerCase();
-  if (value === 'real') return '在线模式';
-  if (value === 'hybrid') return '混合模式';
-  if (value === 'auto') return '自动模式';
-  return '演示模式';
-}
-
-function serviceStatus(ok, onlineText = '在线可用', fallbackText = '本地兜底') {
-  return ok ? onlineText : fallbackText;
-}
-
-function logServiceName(provider) {
-  const value = String(provider || '').toLowerCase();
-  if (value.includes('vision')) return '视觉服务';
-  if (value.includes('tts')) return '语音播报';
-  if (value.includes('asr')) return '语音识别';
-  if (value.includes('qiniu')) return '智能服务';
-  return '服务';
-}
-
-function logStatusText(status) {
-  if (status === 'success') return '正常';
-  if (status === 'error') return '异常';
-  if (status === 'fallback') return '本地兜底';
-  return status || '—';
-}
-
-function speechRecognitionStatus(providers) {
-  const mode = providers.speech_provider_mode;
-  if (mode === 'mock') return { text: '演示模式', tone: 'warn' };
-  if (['real', 'auto'].includes(mode)) {
-    return { text: '演示兜底', tone: 'warn' };
-  }
-  return { text: '演示模式', tone: 'warn' };
-}
-
 export default function InventoryPanel({ inventory, providerLogs, health }) {
   const items = inventory || [];
-  const logs = (providerLogs || []).slice(-3);
   const providers = health?.providers || {};
+  const hasLiveConnection = Boolean(
+    providers.qiniu_configured ||
+      providers.vision_model_configured ||
+      providers.volc_tts_configured ||
+      providers.volc_asr_configured ||
+      providerLogs?.some((log) => log.status === 'success'),
+  );
 
   return (
     <div className="rp-section flex scroll">
@@ -67,75 +36,13 @@ export default function InventoryPanel({ inventory, providerLogs, health }) {
         })
       )}
 
-      <div className="provider-block">
-        <div
-          className="rp-head"
-          style={{ marginBottom: 4, marginTop: 4 }}
-        >
-          <span className="section-label">服务状态</span>
-        </div>
+      <div className="provider-block compact">
         <div className="provider-row">
-          <span className="key">智能服务</span>
-          <span className="val">{modeLabel(health?.demo_mode)}</span>
-        </div>
-        <div className="provider-row">
-          <span className="key">任务理解</span>
-          <span
-            className={`val ${
-              providers.qiniu_configured ? 'ok' : 'warn'
-            }`}
-          >
-            {serviceStatus(providers.qiniu_configured)}
+          <span className="key">终端连接</span>
+          <span className={`val ${hasLiveConnection ? 'ok' : 'warn'}`}>
+            {hasLiveConnection ? '已连接' : '本机可用'}
           </span>
         </div>
-        <div className="provider-row">
-          <span className="key">视觉服务</span>
-          <span
-            className={`val ${
-              providers.vision_model_configured ? 'ok' : 'warn'
-            }`}
-          >
-            {serviceStatus(providers.vision_model_configured)}
-          </span>
-        </div>
-        <div className="provider-row">
-          <span className="key">语音播报</span>
-          <span
-            className={`val ${
-              providers.volc_tts_configured ? 'ok' : 'warn'
-            }`}
-          >
-            {serviceStatus(providers.volc_tts_configured)}
-          </span>
-        </div>
-        <div className="provider-row">
-          <span className="key">语音识别</span>
-          <span className={`val ${speechRecognitionStatus(providers).tone}`}>
-            {speechRecognitionStatus(providers).text}
-          </span>
-        </div>
-        {logs.map((log) => (
-          <div className="provider-row" key={log.id}>
-            <span className="key" title={log.provider}>
-              {logServiceName(log.provider)}
-            </span>
-            <span
-              className={`val ${
-                log.status === 'success'
-                  ? 'ok'
-                  : log.status === 'error'
-                  ? 'bad'
-                  : 'warn'
-              }`}
-              title={log.status}
-            >
-              {logStatusText(log.status)}
-              {Number.isFinite(log.latency_ms)
-                ? ` · ${log.latency_ms}ms`
-                : ''}
-            </span>
-          </div>
-        ))}
       </div>
     </div>
   );

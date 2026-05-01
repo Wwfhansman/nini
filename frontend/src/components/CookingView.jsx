@@ -8,6 +8,13 @@ function formatTimer(seconds) {
   return `${mm}:${ss}`;
 }
 
+function timerStatusLabel(status) {
+  if (status === 'running') return '正在计时';
+  if (status === 'paused') return '已暂停';
+  if (status === 'finished') return '已完成';
+  return '准备中';
+}
+
 /* Display-only countdown. The backend stays the source of truth: every
    server response resets `displayRemaining`, and the local interval just
    ticks the visual; it never POSTs. */
@@ -110,7 +117,7 @@ export default function CookingView({ state, onControl, loading }) {
                   />
                 </div>
                 <div className="timer-status">
-                  状态：{status} · 共 {step.duration_seconds || 0}s
+                  {timerStatusLabel(status)} · 预计 {step.duration_seconds || 0} 秒
                 </div>
               </div>
             </div>
@@ -179,7 +186,7 @@ export default function CookingView({ state, onControl, loading }) {
             disabled={loading}
             onClick={() => onControl('pause')}
           >
-            ⏸ 暂停
+            ⏸ 暂停一下
           </button>
         ) : (
           <button
@@ -188,7 +195,7 @@ export default function CookingView({ state, onControl, loading }) {
             disabled={loading}
             onClick={() => onControl('start')}
           >
-            ▶ 开始
+            ▶ 开始做
           </button>
         )}
         {isLastStep ? (
@@ -198,7 +205,7 @@ export default function CookingView({ state, onControl, loading }) {
             disabled={loading}
             onClick={() => onControl('finish')}
           >
-            完成 ✓
+            做完了 ✓
           </button>
         ) : (
           <button

@@ -16,7 +16,7 @@ from backend.agent.ui_patch import (
     build_vision_prompt_ui_patch,
     build_vision_ui_patch,
 )
-from backend.agent.voice_router import route_voice_text
+from backend.agent.voice_router import route_voice_text, wants_start_cooking_text
 from backend.config import get_settings
 from backend.skills import inventory, memory, recipe, vision
 from backend.terminal import state as terminal_state
@@ -51,6 +51,39 @@ def _record_event(
         status=status,
         db_path=db_path,
     )
+
+
+def _record_local_control_event(
+    terminal_id: str,
+    command: str,
+    speech: str,
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    return database.add_tool_event(
+        terminal_id=terminal_id,
+        event_type="local_control",
+        name=command,
+        input_json={"command": command},
+        output_json={"model_called": False, "speech": speech},
+        status="success",
+        db_path=db_path,
+    )
+
+
+def _start_planned_recipe(state: Dict[str, Any]) -> Optional[str]:
+    recipe_plan = state.get("recipe") or {}
+    steps = recipe_plan.get("steps") or []
+    if not steps:
+        return None
+    index = min(max(int(state.get("current_step_index", 0) or 0), 0), len(steps) - 1)
+    state["ui_mode"] = "cooking"
+    state["current_step_index"] = index
+    state["timer_status"] = "running"
+    state["timer_remaining_seconds"] = int(steps[index].get("duration_seconds", 0) or 0)
+    speech = f"开始做这道{state.get('dish_name') or recipe_plan.get('dish_name') or '菜'}。"
+    state["last_speech"] = speech
+    state["ui_patch"] = build_cooking_ui_patch(state)
+    return speech
 
 
 def _provider_log(
@@ -169,6 +202,45 @@ def _is_direct_recipe_request(text: str) -> bool:
     return recipe.supports_direct_recipe_request(normalized)
 
 
+def _is_generic_recipe_request(text: str) -> bool:
+    normalized = "".join(str(text or "").split())
+    if not normalized:
+        return False
+    control_tokens = [
+        "下一步",
+        "上一步",
+        "暂停",
+        "继续",
+        "做完了",
+        "完成了",
+        "做好了",
+        "再说一遍",
+        "看看食材",
+        "看一下食材",
+        "重新开始",
+        "重新规划",
+    ]
+    if any(token in normalized for token in control_tokens):
+        return False
+    request_tokens = [
+        "给我做个菜",
+        "帮我做个菜",
+        "做个菜",
+        "做一道菜",
+        "推荐一道菜",
+        "推荐个菜",
+        "推荐一个菜",
+        "安排一道菜",
+        "安排个菜",
+        "今晚吃什么",
+        "今天吃什么",
+        "吃什么",
+        "随便做个菜",
+        "随便推荐",
+    ]
+    return any(token in normalized for token in request_tokens)
+
+
 def _build_recipe_plan_context(
     terminal_id: str,
     request_text: str,
@@ -190,12 +262,13 @@ def _handle_direct_recipe_request(
     request: ChatRequest,
     state: Dict[str, Any],
     db_path: Optional[str],
+    source_intent: str = "direct_recipe_plan",
 ) -> Dict[str, Any]:
     database.add_conversation(
         terminal_id,
         "user",
         request.text,
-        metadata_json={"source": request.source, "intent": "direct_recipe_plan"},
+        metadata_json={"source": request.source, "intent": source_intent},
         db_path=db_path,
     )
     plan_context = _build_recipe_plan_context(terminal_id, request.text, state, db_path)
@@ -216,14 +289,20 @@ def _handle_direct_recipe_request(
             "last_speech": speech,
         }
     )
-    next_state = database.save_state(terminal_id, next_state, db_path=db_path)
     event = _record_event(
         terminal_id,
         "recipe_plan",
-        input_json={"intent": "direct_recipe_plan"},
+        input_json={"intent": source_intent},
         output_json={"dish_name": planned_recipe["dish_name"]},
         db_path=db_path,
     )
+    events = [event]
+    if wants_start_cooking_text(request.text):
+        start_speech = _start_planned_recipe(next_state)
+        if start_speech:
+            speech = start_speech
+            events.append(_record_local_control_event(terminal_id, "start", speech, db_path=db_path))
+    next_state = database.save_state(terminal_id, next_state, db_path=db_path)
     database.add_conversation(
         terminal_id,
         "assistant",
@@ -245,7 +324,7 @@ def _handle_direct_recipe_request(
             },
         },
         "state": next_state,
-        "events": [event],
+        "events": events,
     }
 
 
@@ -559,6 +638,15 @@ def handle_chat(
         return _handle_start_vision(terminal_id, state, voice_route, resolved_db_path)
     if _is_direct_recipe_request(request.text):
         return _handle_direct_recipe_request(terminal_id, request, state, resolved_db_path)
+    if _is_generic_recipe_request(request.text):
+        return _handle_direct_recipe_request(
+            terminal_id,
+            request,
+            state,
+            resolved_db_path,
+            source_intent="generic_recipe_plan",
+        )
+    start_after_planning = wants_start_cooking_text(request.text)
 
     database.add_conversation(
         terminal_id,
@@ -660,7 +748,9 @@ def handle_chat(
         )
 
     next_state = dict(state)
+    planned_this_turn = False
     if agent_output.intent == "plan_recipe" or "recipe_plan" in tool_names:
+        planned_this_turn = True
         plan_context = {
             **context,
             "request_text": request.text,
@@ -720,6 +810,12 @@ def handle_chat(
         next_state["ui_mode"] = state.get("ui_mode", agent_output.ui_mode)
         if agent_ui_patch:
             next_state["ui_patch"] = agent_ui_patch
+
+    if planned_this_turn and start_after_planning:
+        start_speech = _start_planned_recipe(next_state)
+        if start_speech:
+            agent_output.speech = start_speech
+            events.append(_record_local_control_event(terminal_id, "start", start_speech, db_path=resolved_db_path))
 
     next_state["last_speech"] = agent_output.speech
     next_state = database.save_state(terminal_id, next_state, db_path=resolved_db_path)

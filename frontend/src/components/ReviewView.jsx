@@ -82,7 +82,7 @@ export default function ReviewView({
           </div>
 
           <div className="info-block">
-            <div className="info-title">写入家庭记忆</div>
+            <div className="info-title">家庭记忆已更新</div>
             {memories.length === 0 ? (
               <div className="mem-empty">暂无家庭记忆</div>
             ) : (
@@ -112,7 +112,7 @@ export default function ReviewView({
             disabled={loading}
             onClick={onExportMemory}
           >
-            导出家庭记忆卡
+            保存家庭记忆卡
           </button>
           <button
             type="button"
@@ -120,7 +120,7 @@ export default function ReviewView({
             disabled={loading}
             onClick={() => onControl('reset')}
           >
-            再做一道
+            重新规划
           </button>
         </div>
         <UiPatchPhrases phrases={uiPatch.suggested_phrases} />

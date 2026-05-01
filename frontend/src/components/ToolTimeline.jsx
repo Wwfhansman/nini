@@ -9,32 +9,32 @@ const EVENT_LABELS = {
   inventory_update: { label: '更新食材库存', tool: '食材库存' },
   recipe_plan: { label: '生成晚餐方案', tool: '晚餐方案' },
   recipe_adjust: { label: '调整烹饪方案', tool: '烹饪方案' },
-  vision_observe: { label: '识别食材画面', tool: '终端视觉' },
+  vision_observe: { label: '查看食材', tool: '台面观察' },
   speech_tts: { label: '生成语音回复', tool: '语音播报' },
   speech_asr: { label: '理解语音输入', tool: '语音理解' },
-  provider_call: { label: '智能服务响应', tool: '智能服务' },
-  provider_error: { label: '启用本地兜底', tool: '本地兜底' },
+  provider_call: { label: '连接厨房大脑', tool: '连接状态' },
+  provider_error: { label: '切换备用处理', tool: '连接状态' },
   vision_provider_fallback: {
-    label: '视觉服务兜底',
-    tool: '本地兜底',
+    label: '切换备用看食材',
+    tool: '连接状态',
   },
   recipe_knowledge_import: {
     label: '导入家庭菜谱',
     tool: '家庭菜谱',
   },
   start_vision: { label: '准备查看食材', tool: '终端视觉', local: true },
-  start: { label: '开始烹饪', tool: '本地即时响应', local: true },
-  next_step: { label: '进入下一步', tool: '本地即时响应', local: true },
+  start: { label: '开始做这道', tool: '即时处理', local: true },
+  next_step: { label: '进入下一步', tool: '即时处理', local: true },
   previous_step: {
     label: '回到上一步',
-    tool: '本地即时响应',
+    tool: '即时处理',
     local: true,
   },
-  pause: { label: '暂停烹饪', tool: '本地即时响应', local: true },
-  resume: { label: '继续烹饪', tool: '本地即时响应', local: true },
-  finish: { label: '完成复盘', tool: '本地即时响应', local: true },
-  reset: { label: '重新规划', tool: '本地即时响应', local: true },
-  repeat_current_step: { label: '重复当前步骤', tool: '本地即时响应', local: true },
+  pause: { label: '暂停一下', tool: '即时处理', local: true },
+  resume: { label: '继续做', tool: '即时处理', local: true },
+  finish: { label: '做完了', tool: '即时处理', local: true },
+  reset: { label: '重新规划', tool: '即时处理', local: true },
+  repeat_current_step: { label: '再说一遍', tool: '即时处理', local: true },
 };
 
 function describe(event) {
@@ -51,7 +51,7 @@ function describe(event) {
 
 function statusText(status, isError) {
   if (status === 'success') return '已完成';
-  if (status === 'fallback') return '本地兜底';
+  if (status === 'fallback') return '备用处理';
   if (status === 'error') return '需要处理';
   return isError ? '需要处理' : status;
 }
@@ -78,9 +78,9 @@ function eventDescription(event) {
     return `${out.items.length} 项库存`;
   }
   if (event.name === 'provider_call' && out.latency_ms) {
-    return `响应 ${out.latency_ms}ms`;
+    return '连接顺畅';
   }
-  if (event.name === 'provider_error') return '已用本地方案继续';
+  if (event.name === 'provider_error') return '已用备用方案继续';
   return null;
 }
 
@@ -105,10 +105,10 @@ export default function ToolTimeline({ events }) {
   return (
     <div className="rp-section agent-work">
       <div className="rp-head">
-        <span className="section-label">Agent 正在处理</span>
+        <span className="section-label">妮妮正在处理</span>
         {current ? (
           <span className="rp-aux live">
-            <span className="dot">●</span> 实时更新
+            <span className="dot">●</span> 处理中
           </span>
         ) : (
           <span className="rp-aux">待命</span>
@@ -131,7 +131,7 @@ export default function ToolTimeline({ events }) {
             ) : null}
             <div className="timeline-tags">
               {currentMeta.local ? (
-                <span className="tag-mini local">本地即时响应</span>
+                <span className="tag-mini local">即时完成</span>
               ) : (
                 <span className="tag-mini tool">{currentMeta.tool}</span>
               )}

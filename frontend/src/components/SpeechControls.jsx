@@ -18,16 +18,16 @@ export default function SpeechControls({
   const statusText = {
     idle: '待命',
     sleeping: '休眠',
-    listening_for_wake: '待唤醒',
+    listening_for_wake: '等你唤醒',
     active_listening: '我在听',
-    transcribing: '识别中',
-    requesting: '请求麦克风',
+    transcribing: '听懂中',
+    requesting: '准备麦克风',
     recording: '正在听',
     stopping: '收尾中',
-    recognizing: '识别中',
+    recognizing: '听懂中',
     thinking: '理解中',
     speaking: '播报中',
-    unsupported: '不支持录音',
+    unsupported: '语音不可用',
     denied: '麦克风未授权',
     error: '需要处理',
   }[voiceStatus] || '待命';
@@ -35,19 +35,19 @@ export default function SpeechControls({
   const primaryLabel = {
     idle: '开启语音会话',
     sleeping: '开启语音会话',
-    listening_for_wake: '休眠',
-    active_listening: '休眠',
-    transcribing: '休眠',
-    requesting: '请求麦克风…',
-    recording: '停止并识别',
+    listening_for_wake: '收起语音',
+    active_listening: '收起语音',
+    transcribing: '收起语音',
+    requesting: '准备中…',
+    recording: '说完了',
     stopping: '处理中…',
-    recognizing: '识别中…',
-    thinking: '休眠',
-    speaking: '休眠',
-    unsupported: '无法录音',
+    recognizing: '听懂中…',
+    thinking: '收起语音',
+    speaking: '收起语音',
+    unsupported: '语音不可用',
     denied: '麦克风未授权',
     error: '重新开始',
-  }[voiceStatus] || '开始说话';
+  }[voiceStatus] || '开启语音';
 
   const durationText =
     recordingState === 'recording' ||
@@ -91,21 +91,21 @@ export default function SpeechControls({
             "开启后说“妮妮”唤醒，连续说话即可。"}
         </span>
       </div>
-      <div className="tts-vendor-switch" aria-label="语音播报服务">
-        <span>语音播报：</span>
+      <div className="tts-vendor-switch" aria-label="声音选择">
+        <span>声音：</span>
         <button
           type="button"
           className={ttsVendor === 'bytedance' ? 'active' : ''}
           onClick={() => onTtsVendorChange?.('bytedance')}
         >
-          字节
+          清亮
         </button>
         <button
           type="button"
           className={ttsVendor === 'xiaomi' ? 'active' : ''}
           onClick={() => onTtsVendorChange?.('xiaomi')}
         >
-          小米
+          温柔
         </button>
       </div>
       <button
@@ -127,17 +127,17 @@ export default function SpeechControls({
         type="button"
         onClick={onPickAudio}
         disabled={secondaryDisabled}
-        title="上传录音文件"
+        title="选择语音文件"
       >
-        上传录音
+        语音文件
       </button>
       <button
         type="button"
         onClick={onPlayTts}
         disabled={secondaryDisabled}
-        title="重播最近一次妮妮回复"
+        title="再说一遍"
       >
-        重播回复
+        再说一遍
       </button>
     </div>
   );
