@@ -329,6 +329,28 @@ class VolcStreamingASRProvider:
                 self.model,
             )
 
+    def _format_connect_error(self, exc: Exception) -> str:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        headers = getattr(response, "headers", None)
+        parts = [str(exc)]
+        if status_code:
+            parts.append(f"status={status_code}")
+        if headers:
+            try:
+                status_header = headers.get("X-Api-Status-Code") or headers.get("x-api-status-code")
+                message_header = headers.get("X-Api-Message") or headers.get("x-api-message")
+                log_id = headers.get("X-Tt-Logid") or headers.get("x-tt-logid")
+            except AttributeError:
+                status_header = message_header = log_id = None
+            if status_header:
+                parts.append(f"x_api_status={status_header}")
+            if message_header:
+                parts.append(f"x_api_message={message_header}")
+            if log_id:
+                parts.append(f"log_id={log_id}")
+        return "; ".join(parts)
+
     async def start_session(self, terminal_id: str, sample_rate: int = 16000) -> VolcStreamingASRSession:
         self._validate_config()
         try:
@@ -379,7 +401,7 @@ class VolcStreamingASRProvider:
             await websocket.send(build_full_request_frame(request_payload, sequence=1))
         except Exception as exc:
             raise SpeechProviderError(
-                f"Volcengine streaming ASR connection failed: {exc}",
+                f"Volcengine streaming ASR connection failed: {self._format_connect_error(exc)}",
                 self.name,
                 self.model,
             ) from exc

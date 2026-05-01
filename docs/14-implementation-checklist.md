@@ -212,7 +212,7 @@
 - [ ] mock 版演示视频。
 - [ ] hybrid/real 片段。
 - [ ] PPT。
-- [ ] README 运行说明。
+- [x] README 运行说明。
 - [ ] 架构图。
 - [ ] 答辩 Q&A。
 - [ ] 源码整理。
@@ -220,8 +220,36 @@
 验收：
 
 - [ ] 无 API key 能跑 mock。
-- [ ] 配置 API key 能跑真实 provider。
+- [ ] 配置 API key 能跑真实 provider：
+  - [ ] `/health` 显示 Qiniu、vision、Volc ASR/TTS 均已配置。
+  - [ ] `hybrid-smoke --timeout 60` 看到 `qiniu_chat` 成功且 `fallback_used=false`。
+  - [ ] `speech-smoke --timeout 60` 看到 TTS 成功且 `fallback_used=false`。
+  - [ ] `voice-smoke --timeout 60` 看到 `volc_streaming_asr` 启动且 `fallback_used=false`。
 - [ ] 视频中清楚展示三大高光：
   - [ ] 现实食材打断计划。
   - [ ] 记忆立即改变步骤。
   - [ ] P0 指令不走模型。
+
+## 11. 上线前本地验收顺序
+
+这组命令用于比赛演示前最终检查。先保留 mock 主线，再检查 real 加分片段。
+
+```bash
+./.venv/bin/pytest backend/tests
+cd frontend && npm run build
+```
+
+后端启动后：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+./.venv/bin/python scripts/run_mock_demo.py --mode hybrid-smoke --timeout 60 --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+./.venv/bin/python scripts/run_mock_demo.py --mode speech-smoke --timeout 60 --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+./.venv/bin/python scripts/run_mock_demo.py --mode voice-smoke --timeout 60 --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+兜底标准：
+
+- `mock-demo` 必须通过，作为现场主线。
+- real/hybrid smoke 任一失败时，不阻塞 mock 演示；只取消对应加分片段。
+- 发布前再次确认 `.env`、`data/`、日志、录屏原始文件未进入 git。

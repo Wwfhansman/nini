@@ -7,8 +7,10 @@ const EVENT_LABELS = {
   memory_delete_cancel: { label: '保留家庭记忆', tool: '家庭记忆', local: true },
   memory_delete_not_found: { label: '未找到相关记忆', tool: '家庭记忆', local: true },
   inventory_update: { label: '更新食材库存', tool: '食材库存' },
+  inventory_deduct: { label: '记录食材消耗', tool: '食材库存' },
   recipe_plan: { label: '生成晚餐方案', tool: '晚餐方案' },
   recipe_adjust: { label: '调整烹饪方案', tool: '烹饪方案' },
+  cooking_review: { label: '整理本次复盘', tool: '家庭复盘' },
   vision_observe: { label: '查看食材', tool: '台面观察' },
   speech_tts: { label: '生成语音回复', tool: '语音播报' },
   speech_asr: { label: '理解语音输入', tool: '语音理解' },
@@ -76,6 +78,12 @@ function eventDescription(event) {
   }
   if (event.name === 'inventory_update' && out.items?.length) {
     return `${out.items.length} 项库存`;
+  }
+  if (event.name === 'inventory_deduct' && out.items?.length) {
+    return `${out.items.length} 项食材`;
+  }
+  if (event.name === 'cooking_review') {
+    return '已生成家庭记忆卡';
   }
   if (event.name === 'provider_call' && out.latency_ms) {
     return '连接顺畅';

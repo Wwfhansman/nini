@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import SpeechControls from './SpeechControls.jsx';
 
 const WAVE_HEIGHTS = [3, 7, 12, 5, 10, 14, 6, 9, 4, 11, 7, 3];
 
@@ -24,7 +23,7 @@ function Waveform({ active }) {
   );
 }
 
-function VoiceBar({ voiceStatus }) {
+function VoiceBar({ voiceStatus, ttsVendor, onTtsVendorChange }) {
   const label =
     {
       idle: '待命',
@@ -76,28 +75,23 @@ function VoiceBar({ voiceStatus }) {
           {label}
         </span>
       </div>
-      <Waveform active={active} />
-    </div>
-  );
-}
-
-const VOICE_HINTS = {
-  planning: ['今晚吃什么', '我最近减脂', '妈妈不吃辣', '看看食材', '就做这个'],
-  vision: ['确认这些食材', '重新看一下', '按这些调整菜谱'],
-  cooking: ['下一步', '等一下', '继续', '这一步再说一遍', '做完了'],
-  review: ['再做一道', '这次太酸了', '下次少放盐', '导出家庭记忆'],
-};
-
-function VoiceHints({ uiMode }) {
-  const hints = VOICE_HINTS[uiMode] || VOICE_HINTS.planning;
-  return (
-    <div className="voice-hints">
-      <span className="voice-hints-label">你可以说</span>
-      <div className="voice-hints-list">
-        {hints.map((hint) => (
-          <span key={hint}>{hint}</span>
-        ))}
+      <div className="sound-switch" aria-label="声音选择">
+        <button
+          type="button"
+          className={ttsVendor === 'bytedance' ? 'active' : ''}
+          onClick={() => onTtsVendorChange?.('bytedance')}
+        >
+          清亮
+        </button>
+        <button
+          type="button"
+          className={ttsVendor === 'xiaomi' ? 'active' : ''}
+          onClick={() => onTtsVendorChange?.('xiaomi')}
+        >
+          温柔
+        </button>
       </div>
+      <Waveform active={active} />
     </div>
   );
 }
@@ -105,7 +99,6 @@ function VoiceHints({ uiMode }) {
 export default function LeftPanel({
   messages,
   voiceStatus,
-  uiMode,
   loading,
   onSend,
   onVoicePrimary,
@@ -114,13 +107,14 @@ export default function LeftPanel({
   onPlayTts,
   recordingState,
   recorderError,
-  recordingDurationMs,
   speechRecognitionHint,
   partialTranscript,
   finalTranscript,
   ttsVendor,
   onTtsVendorChange,
-  onQuickAction,
+  onRunExperience,
+  experienceRunning,
+  experienceStep,
 }) {
   const [input, setInput] = useState('');
   const listRef = useRef(null);
@@ -139,6 +133,20 @@ export default function LeftPanel({
       'speaking',
     ].includes(voiceStatus) ||
     ['requesting', 'recording', 'stopping'].includes(recordingState);
+  const voicePrimaryDisabled =
+    ['unsupported', 'denied'].includes(recordingState) ||
+    ['unsupported', 'denied', 'requesting'].includes(voiceStatus);
+  const voiceActive = [
+    'recording',
+    'listening_for_wake',
+    'active_listening',
+    'transcribing',
+    'recognizing',
+    'thinking',
+    'speaking',
+  ].includes(voiceStatus);
+  const voicePrimaryLabel = voiceActive ? '收起语音' : '开启语音会话';
+  const transcriptHint = partialTranscript || finalTranscript || recorderError || speechRecognitionHint;
 
   useEffect(() => {
     if (listRef.current) {
@@ -156,13 +164,24 @@ export default function LeftPanel({
     <div className="leftpanel">
       <div className="section-head">
         <span className="section-label">对话记录</span>
-        <span className="rp-aux">{messages.length} 轮</span>
+        <div className="left-head-actions">
+          <button
+            type="button"
+            className="quiet-link"
+            onClick={onRunExperience}
+            disabled={experienceRunning || loading}
+            title="按今日推荐走一遍完整流程"
+          >
+            {experienceRunning ? '安排中' : '今日推荐'}
+          </button>
+          <span className="rp-aux">{messages.length} 轮</span>
+        </div>
       </div>
 
       <div className="chat-list" ref={listRef}>
         {visible.length === 0 ? (
           <div className="chat-empty">
-            说说今晚想吃什么，或者从「今日推荐」开始。
+            说一句“妮妮，给我做个菜”，或直接告诉我家里有什么。
           </div>
         ) : (
           visible.map((msg) => (
@@ -184,27 +203,19 @@ export default function LeftPanel({
         )}
       </div>
 
-      <VoiceBar voiceStatus={voiceStatus} />
+      <div className="left-console">
+        <VoiceBar
+          voiceStatus={voiceStatus}
+          ttsVendor={ttsVendor}
+          onTtsVendorChange={onTtsVendorChange}
+        />
+        {transcriptHint ? (
+          <div className="voice-inline-note">{transcriptHint}</div>
+        ) : null}
+        {experienceRunning && experienceStep ? (
+          <div className="voice-inline-note">正在安排：{experienceStep}</div>
+        ) : null}
 
-      <SpeechControls
-        voiceStatus={voiceStatus}
-        recordingState={recordingState}
-        recorderError={recorderError}
-        durationMs={recordingDurationMs}
-        speechRecognitionHint={speechRecognitionHint}
-        partialTranscript={partialTranscript}
-        finalTranscript={finalTranscript}
-        ttsVendor={ttsVendor}
-        onTtsVendorChange={onTtsVendorChange}
-        onVoicePrimary={onVoicePrimary}
-        onPickAudio={onPickAudio}
-        onPlayTts={onPlayTts}
-        loading={loading}
-      />
-
-      <VoiceHints uiMode={uiMode} />
-
-      <div className="input-wrap">
         <textarea
           className="input-textarea"
           rows={2}
@@ -219,6 +230,31 @@ export default function LeftPanel({
           }}
         />
         <div className="input-row">
+          <button
+            type="button"
+            className={`voice-action ${voiceActive ? 'active' : ''}`}
+            onClick={onVoicePrimary}
+            title={voicePrimaryLabel}
+            disabled={voicePrimaryDisabled}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <rect
+                x="9"
+                y="2"
+                width="6"
+                height="12"
+                rx="3"
+                fill="currentColor"
+              />
+              <path
+                d="M5 10a7 7 0 0014 0M12 19v3M9 22h6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span>{voicePrimaryLabel}</span>
+          </button>
           <button
             type="button"
             className="icon-btn"
@@ -292,31 +328,6 @@ export default function LeftPanel({
             {loading ? '思考中…' : '发 送'}
           </button>
         </div>
-      </div>
-
-      <div className="quick-nav">
-        <button
-          type="button"
-          className="quick-btn"
-          onClick={() => onQuickAction('planning')}
-          title="重新规划晚餐"
-        >
-          规划晚餐
-        </button>
-        <button
-          type="button"
-          className="quick-btn primary"
-          onClick={() => onQuickAction('cooking')}
-        >
-          开始做
-        </button>
-        <button
-          type="button"
-          className="quick-btn"
-          onClick={() => onQuickAction('review')}
-        >
-          查看复盘
-        </button>
       </div>
     </div>
   );

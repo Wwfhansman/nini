@@ -79,24 +79,32 @@ http://127.0.0.1:8000/test-console
 运行可复现 mock demo：
 
 ```bash
-./.venv/bin/python scripts/run_mock_demo.py --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+DEMO_MODE=mock SPEECH_PROVIDER_MODE=mock ./.venv/bin/python scripts/run_mock_demo.py --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
 ```
 
 运行 hybrid smoke：
 
 ```bash
-./.venv/bin/python scripts/run_mock_demo.py --mode hybrid-smoke --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+./.venv/bin/python scripts/run_mock_demo.py --mode hybrid-smoke --timeout 60 --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
 ```
 
-未配置七牛 MaaS key 或 `MODEL_AGENT` 时，hybrid smoke 会跳过真实 chat 调用并返回成功，避免影响本地/CI mock 验证。已配置时必须看到真实 `provider_call` 成功；如果 `/api/chat` fallback 到 mock，脚本会返回失败。
+未配置七牛 MaaS key 或 `MODEL_AGENT` 时，hybrid smoke 会跳过真实 chat 调用并返回成功，避免影响本地/CI mock 验证。已配置时必须看到真实 `provider_call` 成功；如果 `/api/chat` fallback 到 mock，脚本会返回失败。真实模型首包可能超过 10 秒，赛前验收统一使用 `--timeout 60`。
 
 运行 speech smoke：
 
 ```bash
-./.venv/bin/python scripts/run_mock_demo.py --mode speech-smoke --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+./.venv/bin/python scripts/run_mock_demo.py --mode speech-smoke --timeout 60 --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
 ```
 
 mock 语音不需要任何 key；配置真实 TTS 后，speech smoke 会要求 TTS 不 fallback。ASR 本轮仍是非流式上传接口和 mock fallback。
+
+运行流式语音 real smoke：
+
+```bash
+./.venv/bin/python scripts/run_mock_demo.py --mode voice-smoke --timeout 60 --base-url http://127.0.0.1:8000 --terminal-id demo-kitchen-001
+```
+
+`voice-smoke` 会连接 `/ws/voice`，发送一小段 PCM16 音频并确认后端启动 `volc_streaming_asr` 且未 fallback；它验证的是正式前端使用的实时语音路径，不要求测试音频识别出有效文本。
 
 运行测试：
 
@@ -176,6 +184,8 @@ SPEECH_PROVIDER_MODE=mock
 SPEECH_TIMEOUT_SECONDS=30
 VOLC_ASR_WS_URL=wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
 VOLC_ASR_RESOURCE_ID=volc.bigasr.sauc.duration
+VOLC_ASR_APP_ID=
+VOLC_ASR_ACCESS_TOKEN=
 VOLC_ASR_APP_KEY=
 VOLC_ASR_ACCESS_KEY=
 VOLC_TTS_APP_ID=
@@ -193,6 +203,7 @@ MIMO_TTS_VOICE=茉莉
 - `SPEECH_PROVIDER_MODE=auto|real`：TTS 走火山 V3 `/api/v3/tts/unidirectional`；ASR 优先走火山流式 WebSocket，失败时 fallback mock。
 - 如果前端显示“语音识别：演示模式”，先看 `/health` 里的 `providers.speech_provider_mode`
   是否为 `auto` 或 `real`，以及 `providers.volc_asr_configured` 是否为 `true`。
+- 火山流式 ASR 鉴权头里的 `X-Api-App-Key` 实际填写控制台 APP ID，`X-Api-Access-Key` 填 Access Token；推荐用 `VOLC_ASR_APP_ID` 和 `VOLC_ASR_ACCESS_TOKEN`，旧字段 `VOLC_ASR_APP_KEY` / `VOLC_ASR_ACCESS_KEY` 仍兼容。
 - `VOLC_TTS_ACCESS_KEY` 是火山文档里的 Access Key；如果你已经填了旧字段名 `VOLC_TTS_ACCESS_TOKEN`，后端也会兼容读取。
 - `VOLC_TTS_RESOURCE_ID` 默认 `seed-tts-1.0`。如果控制台给你的资源 ID 是 `volc.service_type.10029`，就按控制台实际值覆盖。
 - 小米 MiMo 只用于 TTS，不接小米 ASR；ASR 仍走上面的 `/ws/voice` 流式识别链路。
@@ -216,3 +227,10 @@ MIMO_TTS_VOICE=茉莉
 - P0 控制指令由本地状态机处理，不调用大模型。
 - Memory、Inventory、Tool Events、Terminal State 必须真实落库。
 - 视觉、语音、模型 provider 支持 `mock / hybrid / real` 模式，保证线上答辩可复现。
+
+## 赛前上线检查
+
+1. 确认 `git status --short` 只包含本轮准备提交，且 `.env`、`data/`、生成媒体不在提交列表。
+2. 启动后端并访问 `/health`，real 全链路演示时需看到 Qiniu、vision、Volc ASR/TTS 配置均为 `true`。
+3. 依次运行 `pytest backend/tests`、`npm run build`、`mock-demo`、`hybrid-smoke`、`speech-smoke`、`voice-smoke`。
+4. 如果 `hybrid-smoke` 或 `voice-smoke` 失败，现场主流程切回 `DEMO_MODE=mock`、`SPEECH_PROVIDER_MODE=mock`；real provider 只作为加分片段展示。

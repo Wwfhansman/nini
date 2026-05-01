@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import sys
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
+import websockets
 
 
 PLAN_TEXT = "我最近减脂，妈妈不吃辣，冰箱里有鸡胸肉、番茄、鸡蛋，今晚做什么？"
@@ -121,10 +124,17 @@ def ensure_success(response: httpx.Response) -> None:
         raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
 
-def run_demo(base_url: str, terminal_id: str) -> int:
+def _client(timeout_seconds: float) -> httpx.Client:
+    try:
+        return httpx.Client(timeout=timeout_seconds, trust_env=False)
+    except TypeError:
+        return httpx.Client(timeout=timeout_seconds)
+
+
+def run_demo(base_url: str, terminal_id: str, timeout_seconds: float = 45.0) -> int:
     base_url = base_url.rstrip("/")
     step_results: List[StepResult] = []
-    with httpx.Client(timeout=10) as client:
+    with _client(timeout_seconds) as client:
         reset = client.post(
             f"{base_url}/api/control",
             json={"terminal_id": terminal_id, "command": "reset"},
@@ -263,9 +273,9 @@ def run_demo(base_url: str, terminal_id: str) -> int:
     return 0
 
 
-def run_hybrid_smoke(base_url: str, terminal_id: str) -> int:
+def run_hybrid_smoke(base_url: str, terminal_id: str, timeout_seconds: float = 45.0) -> int:
     base_url = base_url.rstrip("/")
-    with httpx.Client(timeout=10) as client:
+    with _client(timeout_seconds) as client:
         health = client.get(f"{base_url}/health")
         ensure_success(health)
         health_payload = health.json()
@@ -280,10 +290,14 @@ def run_hybrid_smoke(base_url: str, terminal_id: str) -> int:
             print("SKIPPED hybrid chat: backend QINIU_API_KEY and MODEL_AGENT are not configured.")
             return 0
 
-        chat = client.post(
-            f"{base_url}/api/chat",
-            json={"terminal_id": terminal_id, "text": PLAN_TEXT, "source": "text"},
-        )
+        try:
+            chat = client.post(
+                f"{base_url}/api/chat",
+                json={"terminal_id": terminal_id, "text": PLAN_TEXT, "source": "text"},
+            )
+        except httpx.TimeoutException:
+            print(f"FAIL hybrid chat: timed out after {timeout_seconds:.0f}s waiting for /api/chat")
+            return 1
         ensure_success(chat)
         payload = chat.json()
         if not successful_real_provider_call(payload):
@@ -301,9 +315,9 @@ def run_hybrid_smoke(base_url: str, terminal_id: str) -> int:
     return 0
 
 
-def run_speech_smoke(base_url: str, terminal_id: str) -> int:
+def run_speech_smoke(base_url: str, terminal_id: str, timeout_seconds: float = 45.0) -> int:
     base_url = base_url.rstrip("/")
-    with httpx.Client(timeout=10) as client:
+    with _client(timeout_seconds) as client:
         health = client.get(f"{base_url}/health")
         ensure_success(health)
         health_payload = health.json()
@@ -346,21 +360,130 @@ def run_speech_smoke(base_url: str, terminal_id: str) -> int:
     return 0
 
 
+def _ws_url_from_base_url(base_url: str) -> str:
+    base_url = base_url.rstrip("/")
+    if base_url.startswith("https://"):
+        return "wss://" + base_url[len("https://") :] + "/ws/voice"
+    if base_url.startswith("http://"):
+        return "ws://" + base_url[len("http://") :] + "/ws/voice"
+    return base_url + "/ws/voice"
+
+
+async def _receive_ws_json_until_deadline(websocket: Any, deadline: float) -> Optional[Dict[str, Any]]:
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        return None
+    raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+    return json.loads(raw)
+
+
+async def _run_voice_smoke_async(base_url: str, terminal_id: str, timeout_seconds: float) -> int:
+    ws_url = _ws_url_from_base_url(base_url)
+    # A short voiced PCM16 chunk is enough to force real streaming ASR startup.
+    voiced_chunk = int(1200).to_bytes(2, "little", signed=True) * 4000
+    saw_initial_provider = False
+    saw_real_provider = False
+    saw_fallback = False
+    saw_state = False
+    errors: List[str] = []
+
+    try:
+        async with websockets.connect(ws_url, open_timeout=timeout_seconds) as websocket:
+            await websocket.send(
+                json.dumps(
+                    {"type": "session.start", "terminal_id": terminal_id, "sample_rate": 16000},
+                    ensure_ascii=False,
+                )
+            )
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
+            while asyncio.get_running_loop().time() < deadline:
+                if saw_initial_provider and saw_state:
+                    break
+                message = await _receive_ws_json_until_deadline(websocket, deadline)
+                if message is None:
+                    break
+                if message.get("type") == "asr.provider":
+                    saw_initial_provider = True
+                    print(
+                        "PASS voice session provider announced: "
+                        f"provider={message.get('provider')}, fallback_used={message.get('fallback_used')}, "
+                        f"message={message.get('message')}"
+                    )
+                if message.get("type") == "session.state":
+                    saw_state = True
+                    print(f"PASS voice session state: {message.get('state')}")
+
+            await websocket.send(voiced_chunk)
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
+            while asyncio.get_running_loop().time() < deadline:
+                message = await _receive_ws_json_until_deadline(websocket, deadline)
+                if message is None:
+                    break
+                if message.get("type") == "error":
+                    errors.append(str(message.get("message") or ""))
+                    print(f"FAIL voice streaming ASR error: {message.get('message')}")
+                    continue
+                if message.get("type") != "asr.provider":
+                    continue
+                provider = message.get("provider")
+                fallback_used = bool(message.get("fallback_used"))
+                print(f"PASS voice streaming provider: provider={provider}, fallback_used={fallback_used}")
+                if provider == "volc_streaming_asr" and not fallback_used:
+                    saw_real_provider = True
+                    break
+                if fallback_used:
+                    saw_fallback = True
+                    break
+            await websocket.send(json.dumps({"type": "session.stop"}, ensure_ascii=False))
+    except asyncio.TimeoutError:
+        print(f"FAIL voice smoke: timed out after {timeout_seconds:.0f}s")
+        return 1
+    except Exception as exc:
+        print(f"FAIL voice smoke: {str(exc)[:300]}")
+        return 1
+
+    if saw_real_provider:
+        return 0
+    if saw_fallback:
+        print("FAIL voice smoke: streaming ASR fell back to mock")
+        return 1
+    if errors:
+        return 1
+    print("FAIL voice smoke: did not observe real streaming ASR startup")
+    return 1
+
+
+def run_voice_smoke(base_url: str, terminal_id: str, timeout_seconds: float = 45.0) -> int:
+    return asyncio.run(_run_voice_smoke_async(base_url, terminal_id, timeout_seconds))
+
+
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Nini mock demo flow.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--terminal-id", default="demo-kitchen-001")
-    parser.add_argument("--mode", choices=["mock-demo", "hybrid-smoke", "speech-smoke"], default="mock-demo")
+    parser.add_argument(
+        "--mode",
+        choices=["mock-demo", "hybrid-smoke", "speech-smoke", "voice-smoke"],
+        default="mock-demo",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=45.0,
+        help="HTTP/WebSocket timeout in seconds for provider smoke calls.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
     if args.mode == "hybrid-smoke":
-        return run_hybrid_smoke(args.base_url, args.terminal_id)
+        return run_hybrid_smoke(args.base_url, args.terminal_id, args.timeout)
     if args.mode == "speech-smoke":
-        return run_speech_smoke(args.base_url, args.terminal_id)
-    return run_demo(args.base_url, args.terminal_id)
+        return run_speech_smoke(args.base_url, args.terminal_id, args.timeout)
+    if args.mode == "voice-smoke":
+        return run_voice_smoke(args.base_url, args.terminal_id, args.timeout)
+    return run_demo(args.base_url, args.terminal_id, args.timeout)
 
 
 if __name__ == "__main__":

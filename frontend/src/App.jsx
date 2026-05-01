@@ -662,37 +662,6 @@ export default function App() {
         </div>
       ) : null}
 
-      <div className="experience-bar">
-        <span className="label">今日</span>
-        <button
-          type="button"
-          className="experience-btn"
-          disabled={experienceRunning}
-          onClick={runGuidedFlow}
-        >
-          {experienceRunning ? '安排中…' : '开始体验'}
-        </button>
-        <button
-          type="button"
-          className="experience-btn secondary"
-          disabled={experienceRunning || loading}
-          onClick={triggerImagePicker}
-        >
-          {pendingImage ? '已选台面照片' : '看看食材'}
-        </button>
-        <button
-          type="button"
-          className="experience-btn secondary"
-          disabled={experienceRunning || loading}
-          onClick={() => sendControl('reset')}
-        >
-          重新开始
-        </button>
-        {experienceStep ? (
-          <span className="experience-step">正在：{experienceStep}</span>
-        ) : null}
-      </div>
-
       <div className="app-body">
         <div className="app-col left">
           <LeftPanel
@@ -707,17 +676,14 @@ export default function App() {
             onPlayTts={playLatestSpeech}
             recordingState={recordingState}
             recorderError={recorderError}
-            recordingDurationMs={recordingDurationMs}
             speechRecognitionHint={voiceSession.recognitionMode || speechRecognitionHint}
             partialTranscript={voiceSession.partialTranscript}
             finalTranscript={voiceSession.finalTranscript}
             ttsVendor={ttsVendor}
             onTtsVendorChange={handleTtsVendorChange}
-            onQuickAction={(action) => {
-              if (action === 'planning') sendControl('reset');
-              else if (action === 'cooking') sendControl('start');
-              else if (action === 'review') sendControl('finish');
-            }}
+            onRunExperience={runGuidedFlow}
+            experienceRunning={experienceRunning}
+            experienceStep={experienceStep}
           />
         </div>
         <div className="app-col center">
